@@ -1,0 +1,39 @@
+name: Deploy to GitHub Pages
+# The app is fully static (index.html + src/, Leaflet from CDN), so Pages just
+# serves the assembled files — no build step. Enable once in the repo:
+# Settings → Pages → Source: "GitHub Actions".
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time; a newer push supersedes an in-flight run.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Assemble static site
+        # Publish only the app, not the repo's tooling/tests/issue tracker.
+        run: |
+          mkdir -p _site
+          cp index.html _site/
+          cp -r src _site/
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deployment
+        uses: actions/deploy-pages@v4
