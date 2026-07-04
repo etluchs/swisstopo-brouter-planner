@@ -103,5 +103,6 @@ contributors (via BRouter). Elevation © swisstopo (swissAlti3D).
 - Single-call BRouter batching (`straight=` indices) to cut request *count* — the
   routed legs already fetch concurrently, so this is about server load, and it
   trades against the per-leg interaction model (toggle/highlight/elevation).
-- Configurable swisstopo overlays (public transport, hiking trails, …), like the
-  layer panel on map.geo.admin.ch.
+- More swisstopo overlays, per-overlay opacity, remembering toggles, or a
+  searchable picker over the full swisstopo catalogue (the overlay panel ships
+  with a curated set: Veloland, mountain-bike, and public-transport stops).

@@ -160,6 +160,32 @@ test.describe('route editing', () => {
     await expect(page.locator('#legList .mini.direct')).toHaveCount(1);
   });
 
+  test('toggling a swisstopo overlay requests its tiles', async ({ page }) => {
+    const overlayUrls = [];
+    await page.route(/wmts\.geo\.admin\.ch/, (r) => {
+      const u = r.request().url();
+      if (u.includes('ch.astra.veloland')) overlayUrls.push(u);
+      return r.fulfill({ body: PNG, contentType: 'image/png' });
+    });
+    await page.route(/tile\.opentopomap\.org/, (r) =>
+      r.fulfill({ body: PNG, contentType: 'image/png' })
+    );
+    await stubBrouter(page);
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    const veloland = page
+      .locator('#overlayList label', { hasText: 'Veloland' })
+      .locator('input');
+    await veloland.check();
+    await expect.poll(() => overlayUrls.length).toBeGreaterThan(0);
+    expect(overlayUrls[0]).toMatch(
+      /ch\.astra\.veloland\/default\/current\/2056\/\d+\/\d+\/\d+\.png/
+    );
+    // unchecking removes the layer (no assertion beyond no-throw / stays interactive)
+    await veloland.uncheck();
+    await expect(veloland).not.toBeChecked();
+  });
+
   test('clear removes all waypoints and route', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);

@@ -22,6 +22,37 @@ const topo   = L.tileLayer(TILE('ch.swisstopo.pixelkarte-farbe'),{maxZoom:28,max
 const aerial = L.tileLayer(TILE('ch.swisstopo.swissimage'),      {maxZoom:28,maxNativeZoom:28,attribution:'© swisstopo'});
 
 const map = L.map('map',{crs:swissCRS,center:[47.376,8.541],zoom:19,minZoom:8,maxZoom:28,layers:[topo]});
+
+// Optional swisstopo thematic overlays (transparent PNG, same LV95 grid). Higher
+// zIndex than the base but still in tilePane, so they sit above the map yet below
+// the route (overlayPane) and markers (markerPane). Add a layer = one line here.
+const OVERLAYS=[
+  {id:'ch.astra.veloland',         label:'Cycling routes (Veloland)'},
+  {id:'ch.astra.mountainbikeland', label:'Mountain-bike routes'},
+  {id:'ch.bav.haltestellen-oev',   label:'Public transport stops'},
+];
+const overlayLayers=new Map();   // id -> L.tileLayer (created lazily on first enable)
+function toggleOverlay(id,on){
+  if(on){
+    if(!overlayLayers.has(id))
+      overlayLayers.set(id,L.tileLayer(
+        `https://wmts.geo.admin.ch/1.0.0/${id}/default/current/2056/{z}/{x}/{y}.png`,
+        {maxZoom:28,maxNativeZoom:27,zIndex:10,attribution:'© swisstopo'}));
+    overlayLayers.get(id).addTo(map);
+  }else if(overlayLayers.has(id)){
+    map.removeLayer(overlayLayers.get(id));
+  }
+}
+function renderOverlayList(){
+  const box=document.getElementById('overlayList');
+  OVERLAYS.forEach(o=>{
+    const lab=document.createElement('label');
+    const cb=document.createElement('input');cb.type='checkbox';
+    cb.addEventListener('change',()=>toggleOverlay(o.id,cb.checked));
+    const span=document.createElement('span');span.textContent=o.label;
+    lab.append(cb,span); box.append(lab);
+  });
+}
 const routeGroup = L.layerGroup().addTo(map);
 setTimeout(()=>map.invalidateSize(),200);
 
@@ -267,3 +298,4 @@ document.getElementById('endpoint').addEventListener('change',e=>{endpoint=e.tar
 document.getElementById('btnUndo').onclick=()=>{if(waypoints.length){waypoints.pop();syncMarkers();recompute();}};
 document.getElementById('btnClear').onclick=()=>{waypoints=[];legCache.clear();syncMarkers();recompute();};
 document.getElementById('btnGpx').onclick=exportGpx;
+renderOverlayList();
