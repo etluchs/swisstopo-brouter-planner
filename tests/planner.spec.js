@@ -79,6 +79,12 @@ test.describe('bootstrap', () => {
 });
 
 test.describe('route editing', () => {
+  // every route triggers a whole-route elevation profile POST — stub it so the
+  // suite stays deterministic (individual tests may override to assert the call)
+  test.beforeEach(async ({ page }) => {
+    await page.route(/profile\.json/, (r) => r.fulfill({ json: profile }));
+  });
+
   test('clicking the map adds waypoints', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);
@@ -205,9 +211,25 @@ test.describe('route editing', () => {
     await expect(popup).toBeVisible();
     await expect(popup).toContainText('Zürich HB SZU');
     await expect(popup).toContainText('Münsterhof');
+    // a Veloland route links to its SchweizMobil page, built from chmobil_route_number
+    await expect(
+      popup.locator('a.id-link[href="https://schweizmobil.ch/en/cycling-in-switzerland/route-66"]')
+    ).toBeVisible();
     // right-click must NOT drop a waypoint
     await expect(page.locator('.leaflet-marker-icon')).toHaveCount(0);
     await expect(page.locator('#legList li')).toHaveCount(0);
+  });
+
+  test('a route renders an elevation profile chart', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    // whole-route profile (stubbed via beforeEach) renders an SVG under the stats
+    await expect(page.locator('#profileGrp')).toBeVisible();
+    await expect(page.locator('#profile svg.prof')).toBeVisible();
   });
 
   test('“Send to phone” shares the GPX via the Web Share API', async ({ page }) => {

@@ -83,6 +83,14 @@ async function identifyAt(latlng){
 }
 const featLabel=a=>(a&&(a.name||a.label||a.bezeichnung||a.gemname))||'';
 const escapeHtml=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// SchweizMobil route pages, buildable from the identify attribute chmobil_route_number.
+const SCHWEIZMOBIL={'ch.astra.veloland':'cycling-in-switzerland',
+                    'ch.astra.mountainbikeland':'mountainbiking-in-switzerland'};
+function schweizmobilUrl(r){
+  const path=SCHWEIZMOBIL[r.layerBodId];
+  const n=r.attributes&&Number(r.attributes.chmobil_route_number);   // numeric → safe href
+  return (path&&Number.isFinite(n))?`https://schweizmobil.ch/en/${path}/route-${n}`:null;
+}
 function identifyHtml(results){
   if(!results.length) return 'Nothing to identify here.';
   const seen=new Set(), rows=[];
@@ -90,8 +98,12 @@ function identifyHtml(results){
     const name=featLabel(r.attributes)||'(unnamed)';
     const key=(r.layerBodId||'')+'|'+name;
     if(seen.has(key)) continue; seen.add(key);
+    const url=schweizmobilUrl(r);
+    const nameHtml=url
+      ? `<a class="id-link" href="${url}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)} ↗</a>`
+      : escapeHtml(name);
     rows.push(`<div class="id-row"><span class="id-layer">${escapeHtml(r.layerName||r.layerBodId||'')}</span>`
-      +`${escapeHtml(name)}</div>`);
+      +`${nameHtml}</div>`);
     if(rows.length>=6) break;
   }
   return `<div class="id-list">${rows.join('')}</div>`;
@@ -193,10 +205,84 @@ async function fetchDirectAscend(a,b){
   directCache.set(key,asc); return asc;
 }
 
+// ---- whole-route elevation profile ----
+// One swissAlti3D profile for the entire route (routed + direct legs), POSTed so
+// the full geometry fits. Best-effort and cached; the ascent stat is unchanged.
+const PROFILE_API='https://api3.geo.admin.ch/rest/services/profile.json';
+const profileCache=new Map();   // route signature -> [{d,e}]
+let profileMarker=null;
+const routeSig=()=>waypoints.map(w=>`${w.lng.toFixed(5)},${w.lat.toFixed(5)},${w.mode}`).join('|');
+function downsample(arr,max){
+  if(arr.length<=max) return arr.slice();
+  const step=(arr.length-1)/(max-1), out=[];
+  for(let i=0;i<max;i++) out.push(arr[Math.round(i*step)]);
+  return out;
+}
+async function fetchProfile(flat){   // flat: [[lat,lng]...]
+  const coords=downsample(flat,350).map(([lat,lng])=>wgs84ToLv95(lng,lat));
+  const body=new URLSearchParams({
+    geom:JSON.stringify({type:'LineString',coordinates:coords}), sr:'2056', nbPoints:'150'});
+  const res=await fetch(PROFILE_API,{method:'POST',
+    headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
+  if(!res.ok) throw new Error('profile '+res.status);
+  return (await res.json()).map(p=>({d:p.dist,e:p.alts.COMB}));
+}
+async function updateProfile(legs,my){
+  const flat=[];                         // one deduped line through all legs
+  for(const o of legs) for(const ll of o.latlngs){
+    const last=flat[flat.length-1];
+    if(!last||last[0]!==ll[0]||last[1]!==ll[1]) flat.push(ll);
+  }
+  if(flat.length<2){renderProfile(null);return;}
+  const sig=routeSig();
+  let prof=profileCache.get(sig);
+  if(!prof){ try{ prof=await fetchProfile(flat); }catch(_){ return; } if(my!==gen)return; profileCache.set(sig,prof); }
+  if(my!==gen)return;
+  renderProfile(prof,flat);
+}
+function renderProfile(prof,flat){
+  const grp=document.getElementById('profileGrp'), box=document.getElementById('profile');
+  if(!prof||prof.length<2){grp.style.display='none';box.innerHTML='';clearProfileMarker();return;}
+  grp.style.display='';
+  const W=300,H=88, dMax=prof[prof.length-1].d||1;
+  const es=prof.map(p=>p.e), eMin=Math.min(...es), eMax=Math.max(...es), eRange=Math.max(1,eMax-eMin);
+  const X=d=>(d/dMax)*W, Y=e=>H-3-((e-eMin)/eRange)*(H-6);
+  const line=prof.map(p=>`${X(p.d).toFixed(1)},${Y(p.e).toFixed(1)}`).join(' ');
+  box.innerHTML=
+    `<svg id="profSvg" class="prof" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
+    +`<polygon class="prof-area" points="0,${H} ${line} ${W},${H}"/>`
+    +`<polyline class="prof-line" points="${line}"/>`
+    +`<line id="profCross" class="prof-cross" x1="0" y1="0" x2="0" y2="${H}" style="display:none"/></svg>`
+    +`<div class="prof-meta"><span id="profRead">${Math.round(eMin)}–${Math.round(eMax)} m</span>`
+    +`<span>${(dMax/1000).toFixed(1)} km</span></div>`;
+  // hover the chart → readout + a marker on the map at that distance
+  const svg=document.getElementById('profSvg'),cross=document.getElementById('profCross'),read=document.getElementById('profRead');
+  const cum=[0];
+  for(let i=1;i<flat.length;i++) cum.push(cum[i-1]+haversine([flat[i-1][1],flat[i-1][0]],[flat[i][1],flat[i][0]]));
+  const total=cum[cum.length-1]||1;
+  svg.addEventListener('mousemove',ev=>{
+    const r=svg.getBoundingClientRect(), fx=Math.max(0,Math.min(1,(ev.clientX-r.left)/r.width));
+    const p=prof[Math.round(fx*(prof.length-1))];
+    cross.style.display=''; cross.setAttribute('x1',(fx*W).toFixed(1)); cross.setAttribute('x2',(fx*W).toFixed(1));
+    read.textContent=`${Math.round(p.e)} m · ${(p.d/1000).toFixed(1)} km`;
+    const dd=fx*total; let i=1; while(i<cum.length&&cum[i]<dd) i++;
+    const t=(dd-cum[i-1])/Math.max(1e-6,cum[i]-cum[i-1]), a=flat[i-1], b=flat[Math.min(i,flat.length-1)];
+    setProfileMarker(a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t);
+  });
+  svg.addEventListener('mouseleave',()=>{cross.style.display='none';
+    read.textContent=`${Math.round(eMin)}–${Math.round(eMax)} m`;clearProfileMarker();});
+}
+function setProfileMarker(lat,lng){
+  if(!profileMarker) profileMarker=L.circleMarker([lat,lng],
+    {radius:6,color:'#fff',weight:2,fillColor:getCss('--alpine'),fillOpacity:1,interactive:false}).addTo(map);
+  else profileMarker.setLatLng([lat,lng]);
+}
+function clearProfileMarker(){ if(profileMarker){map.removeLayer(profileMarker);profileMarker=null;} }
+
 async function recompute(){
   const my=++gen;
   renderLegList();
-  if(waypoints.length<2){setRoute([]);setStats(0,0);showWarn('');return;}
+  if(waypoints.length<2){setRoute([]);setStats(0,0);showWarn('');renderProfile(null);return;}
   // Kick every routed leg's BRouter fetch off at once (they were sequential),
   // keeping one polyline per leg so the per-leg toggle/highlight/elevation model
   // stays intact. `plan` preserves leg order; routed entries carry a settled
@@ -231,6 +317,7 @@ async function recompute(){
   showWarn(failed
     ? 'A routed leg failed — shown dashed red. On the public endpoint this is usually CORS; point the field at your own BRouter instance. Direct legs still work.'
     : '');
+  updateProfile(legs,my);   // best-effort, gen-guarded; renders once elevation arrives
   // Direct-leg elevation is best-effort and independent of the drawn geometry:
   // fetch it after the path is on screen, then fold it into the ascent stat.
   if(directLegs.length){

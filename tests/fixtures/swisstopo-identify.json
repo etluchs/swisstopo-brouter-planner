@@ -6,6 +6,15 @@
       "attributes": { "name": "Zürich HB SZU" }
     },
     {
+      "layerBodId": "ch.astra.veloland",
+      "layerName": "Cycling routes",
+      "attributes": {
+        "chmobil_route_number": 66,
+        "chmobil_title": "Goldküste–Limmat",
+        "label": "Goldküste–Limmat"
+      }
+    },
+    {
       "layerBodId": "ch.swisstopo.swissnames3d",
       "layerName": "Names",
       "attributes": { "label": "Münsterhof" }
