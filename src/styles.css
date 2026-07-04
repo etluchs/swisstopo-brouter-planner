@@ -54,6 +54,7 @@
   ol.legs{list-style:none;margin:0;padding:0}
   ol.legs li{display:flex;align-items:center;gap:9px;padding:7px 0;border-bottom:1px solid var(--line)}
   ol.legs li:last-child{border-bottom:0}
+  ol.legs li.hot{background:var(--paper);box-shadow:inset 3px 0 0 var(--alpine)}
   .pin{width:16px;height:16px;border-radius:50%;flex:0 0 16px;border:2px solid #fff;
     box-shadow:0 0 0 1px rgba(0,0,0,.15)}
   .legmeta{flex:1;min-width:0;font-size:12px}
@@ -83,6 +84,13 @@
 
   .wp{width:16px;height:16px;border-radius:50%;border:2px solid #fff;cursor:grab;
     box-shadow:0 0 0 1px rgba(0,0,0,.25),0 1px 3px rgba(0,0,0,.3)}
+
+  /* only route polylines are svg paths; waypoints are divIcons, so they keep grab */
+  path.leaflet-interactive{cursor:copy}
+  .leaflet-tooltip.insert-tip{background:var(--ink);color:var(--paper);border:0;border-radius:6px;
+    font-family:var(--body);font-size:11px;font-weight:600;letter-spacing:.02em;padding:3px 8px;
+    box-shadow:0 1px 5px rgba(0,0,0,.3)}
+  .leaflet-tooltip.insert-tip::before{display:none}
 
   @media (max-width:720px){
     #app{flex-direction:column}

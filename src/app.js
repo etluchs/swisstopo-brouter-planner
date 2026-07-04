@@ -28,6 +28,7 @@ topo.on('tileerror',()=>{
 // ---- state ----
 let waypoints=[];            // {id,lng,lat,mode}
 let markers=new Map();       // id -> L.marker
+let legLayers=new Map();     // leg index -> L.polyline (for list<->map highlight)
 let addMode='route', profile='trekking', endpoint='https://brouter.de/brouter';
 const legCache=new Map();    // key -> {coords:[[lng,lat]...], ascend}
 let gen=0;
@@ -111,15 +112,28 @@ async function recompute(){
 
 function setRoute(legs){
   routeGroup.clearLayers();
+  legLayers.clear();
   legs.forEach(o=>{
     const base = o.mode==='route'  ? {color:getCss('--route'),weight:4.5,opacity:.9}
               : o.mode==='direct' ? {color:getCss('--direct'),weight:4,opacity:.95,dashArray:'6,7'}
               :                      {color:getCss('--error'),weight:3,opacity:.9,dashArray:'4,6'};
     const pl=L.polyline(o.latlngs,base).addTo(routeGroup);
+    pl._baseWeight=base.weight;
+    legLayers.set(o.leg,pl);
+    pl.bindTooltip('+ insert waypoint',{sticky:true,direction:'top',opacity:1,className:'insert-tip'});
     pl.on('click',e=>{L.DomEvent.stopPropagation(e);insertOnLeg(o.leg,e.latlng);});
-    pl.on('mouseover',()=>pl.setStyle({weight:base.weight+2}));
-    pl.on('mouseout',()=>pl.setStyle({weight:base.weight}));
+    pl.on('mouseover',()=>emphasizeLeg(o.leg,true));
+    pl.on('mouseout',()=>emphasizeLeg(o.leg,false));
   });
+}
+
+// Two views of one leg: the polyline (map) and its list row. Hovering either
+// lights both, so the user sees which path a Routed/Direct toggle will change.
+function emphasizeLeg(i,on){
+  const pl=legLayers.get(i);
+  if(pl){pl.setStyle({weight:pl._baseWeight+(on?2.5:0)});if(on)pl.bringToFront();}
+  const li=document.querySelector(`#legList li[data-leg="${i}"]`);
+  if(li) li.classList.toggle('hot',on);
 }
 
 // ---- panel ----
@@ -133,6 +147,11 @@ function renderLegList(){
   ol.innerHTML='';
   waypoints.forEach((w,i)=>{
     const li=document.createElement('li');
+    li.dataset.leg=i;
+    if(i>0){                            // row i owns the incoming leg i; light it on hover
+      li.addEventListener('mouseenter',()=>emphasizeLeg(i,true));
+      li.addEventListener('mouseleave',()=>emphasizeLeg(i,false));
+    }
     const pin=document.createElement('span');pin.className='pin';pin.style.background=pinColor(i);
     const meta=document.createElement('div');meta.className='legmeta';
     const label=i===0?'Start':i===waypoints.length-1?'Finish':'Via '+i;
