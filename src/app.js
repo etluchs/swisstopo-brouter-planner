@@ -240,6 +240,7 @@ async function recompute(){
   }
 }
 
+const HIT_WEIGHT=28;   // invisible finger-friendly tap band around each leg
 function setRoute(legs){
   routeGroup.clearLayers();
   legLayers.clear();
@@ -247,13 +248,18 @@ function setRoute(legs){
     const base = o.mode==='route'  ? {color:getCss('--route'),weight:4.5,opacity:.9}
               : o.mode==='direct' ? {color:getCss('--direct'),weight:4,opacity:.95,dashArray:'6,7'}
               :                      {color:getCss('--error'),weight:3,opacity:.9,dashArray:'4,6'};
-    const pl=L.polyline(o.latlngs,base).addTo(routeGroup);
+    // thin visible line (display only) …
+    const pl=L.polyline(o.latlngs,{...base,interactive:false}).addTo(routeGroup);
     pl._baseWeight=base.weight;
     legLayers.set(o.leg,pl);
-    pl.bindTooltip('+ insert waypoint',{sticky:true,direction:'top',opacity:1,className:'insert-tip'});
-    pl.on('click',e=>{L.DomEvent.stopPropagation(e);insertOnLeg(o.leg,e.latlng);});
-    pl.on('mouseover',()=>emphasizeLeg(o.leg,true));
-    pl.on('mouseout',()=>emphasizeLeg(o.leg,false));
+    // … plus a wide transparent line that actually catches taps/hover, so you
+    // don't have to hit the ~4px stroke exactly to insert a waypoint. A coloured
+    // stroke with opacity 0 still counts as "painted" for SVG pointer-events.
+    const hit=L.polyline(o.latlngs,{weight:HIT_WEIGHT,opacity:0,lineCap:'round'}).addTo(routeGroup);
+    hit.bindTooltip('+ insert waypoint',{sticky:true,direction:'top',opacity:1,className:'insert-tip'});
+    hit.on('click',e=>{L.DomEvent.stopPropagation(e);insertOnLeg(o.leg,e.latlng);});
+    hit.on('mouseover',()=>emphasizeLeg(o.leg,true));
+    hit.on('mouseout',()=>emphasizeLeg(o.leg,false));
   });
 }
 

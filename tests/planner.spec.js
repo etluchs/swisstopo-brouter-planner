@@ -100,7 +100,10 @@ test.describe('route editing', () => {
     await page.locator(MAP).click({ position: { x: 250, y: 220 } });
     await page.locator(MAP).click({ position: { x: 430, y: 340 } });
     await expect.poll(() => called).toBe(true);
-    await expect(page.locator('.leaflet-overlay-pane path')).toHaveCount(1);
+    // visible route line only (each leg also has a transparent wide hit line)
+    await expect(
+      page.locator('.leaflet-overlay-pane path:not([stroke-opacity="0"])')
+    ).toHaveCount(1);
     await expect(page.locator('#statDist')).not.toHaveText('0.0');
   });
 
@@ -113,9 +116,11 @@ test.describe('route editing', () => {
     await page.locator(MAP).click({ position: { x: 200, y: 180 } });
     await page.locator(MAP).click({ position: { x: 340, y: 260 } });
     await page.locator(MAP).click({ position: { x: 470, y: 360 } });
-    // 3 waypoints => 2 routed legs => 2 drawn paths; both legs hit BRouter
+    // 3 waypoints => 2 routed legs => 2 visible paths; both legs hit BRouter
     // (>=2; rapid clicks can race the leg cache and refetch, which is fine)
-    await expect(page.locator('.leaflet-overlay-pane path')).toHaveCount(2);
+    await expect(
+      page.locator('.leaflet-overlay-pane path:not([stroke-opacity="0"])')
+    ).toHaveCount(2);
     await expect.poll(() => calls).toBeGreaterThanOrEqual(2);
     await expect(page.locator('#legList li')).toHaveCount(3);
   });
@@ -268,6 +273,30 @@ test.describe('route editing', () => {
         .poll(() => page.evaluate(() => window.__shared))
         .toEqual({ name: 'topo-route.gpx', type: 'application/octet-stream' });
     });
+  });
+
+  test('tapping near a leg (not on the thin line) inserts a mid waypoint', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await stubHeight(page);
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    // direct legs draw a straight screen segment, so the geometry is predictable
+    await page.locator('#modeSeg button[data-mode="direct"]').click();
+    await page.locator(MAP).click({ position: { x: 300, y: 200 } });
+    await page.locator(MAP).click({ position: { x: 500, y: 400 } });
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    const finishCoord = await page
+      .locator('#legList li')
+      .last()
+      .locator('.legmeta .d')
+      .textContent();
+    // click ~7px off the midpoint (400,300): outside the 4px line, inside the 28px band
+    await page.locator(MAP).click({ position: { x: 405, y: 295 } });
+    await expect(page.locator('#legList li')).toHaveCount(3);
+    // inserted mid-route: the middle row is a Via and the Finish endpoint is unchanged
+    await expect(page.locator('#legList li').nth(1).locator('.legmeta .n')).toHaveText('Via 1');
+    await expect(page.locator('#legList li').last().locator('.legmeta .d')).toHaveText(finishCoord);
   });
 
   test('clear removes all waypoints and route', async ({ page }) => {
