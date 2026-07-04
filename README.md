@@ -23,7 +23,8 @@ npm run dev          # serves the app at http://localhost:5173
 
 Open http://localhost:5173, click the map to add points, drag to adjust, click a
 leg to insert a point, toggle any leg between Routed/Direct in the sidebar, and
-export the result as GPX.
+export the result as GPX. On a phone, **Send to phone** hands the GPX straight to
+your share sheet (e.g. Garmin Connect) — no download/upload shuffle.
 
 > The app itself needs no install — `index.html` is static. `npm install` only
 > pulls Playwright for the test suite.

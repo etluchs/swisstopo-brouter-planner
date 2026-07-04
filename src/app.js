@@ -304,7 +304,7 @@ function renderLegList(){
 function showWarn(msg){const w=document.getElementById('warn');w.textContent=msg;w.classList.toggle('show',!!msg);}
 
 // ---- GPX ----
-function exportGpx(){
+function buildGpx(){
   const pts=[];
   for(let i=1;i<waypoints.length;i++){
     const a=waypoints[i-1],b=waypoints[i];
@@ -312,14 +312,31 @@ function exportGpx(){
     else{const c=legCache.get(legKey(a,b));
          if(c)c.coords.forEach(p=>pts.push(p));else pts.push([a.lng,a.lat],[b.lng,b.lat]);}
   }
-  if(pts.length<2){showWarn('Nothing to export yet.');return;}
+  if(pts.length<2) return null;
   const seg=pts.map(p=>`<trkpt lat="${p[1].toFixed(6)}" lon="${p[0].toFixed(6)}"/>`).join('');
-  const gpx=`<?xml version="1.0" encoding="UTF-8"?>\n`
+  return `<?xml version="1.0" encoding="UTF-8"?>\n`
     +`<gpx version="1.1" creator="Topo Route Planner" xmlns="http://www.topografix.com/GPX/1/1">`
     +`<trk><name>topo-route</name><trkseg>${seg}</trkseg></trk></gpx>`;
+}
+const GPX_TYPE='application/gpx+xml';
+function exportGpx(){
+  const gpx=buildGpx();
+  if(!gpx){showWarn('Nothing to export yet.');return;}
   const a=document.createElement('a');
-  a.href=URL.createObjectURL(new Blob([gpx],{type:'application/gpx+xml'}));
+  a.href=URL.createObjectURL(new Blob([gpx],{type:GPX_TYPE}));
   a.download='topo-route.gpx';a.click();URL.revokeObjectURL(a.href);
+}
+// Web Share (mobile): hand the .gpx file to the OS share sheet so it can go
+// straight to Garmin Connect / any app — no download→upload. Falls back to a
+// plain download where file-sharing isn't supported.
+async function shareGpx(){
+  const gpx=buildGpx();
+  if(!gpx){showWarn('Nothing to share yet.');return;}
+  const file=new File([gpx],'topo-route.gpx',{type:GPX_TYPE});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file],title:'topo-route',text:'Route from Topo Route Planner'}); }
+    catch(err){ if(err && err.name!=='AbortError') exportGpx(); }   // ignore user-cancel; else download
+  }else exportGpx();
 }
 
 // ---- wiring ----
@@ -341,4 +358,11 @@ document.getElementById('endpoint').addEventListener('change',e=>{endpoint=e.tar
 document.getElementById('btnUndo').onclick=()=>{if(waypoints.length){waypoints.pop();syncMarkers();recompute();}};
 document.getElementById('btnClear').onclick=()=>{waypoints=[];legCache.clear();syncMarkers();recompute();};
 document.getElementById('btnGpx').onclick=exportGpx;
+const btnShare=document.getElementById('btnShare');
+btnShare.onclick=shareGpx;
+// reveal "Send to phone" only where the browser can share files (mostly mobile)
+try{
+  const probe=new File(['x'],'probe.gpx',{type:GPX_TYPE});
+  if(navigator.canShare && navigator.canShare({files:[probe]})) btnShare.hidden=false;
+}catch(_){/* unsupported → stays hidden, Export GPX still works */}
 renderOverlayList();

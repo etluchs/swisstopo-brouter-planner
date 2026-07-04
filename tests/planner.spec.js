@@ -205,6 +205,36 @@ test.describe('route editing', () => {
     await expect(page.locator('#legList li')).toHaveCount(0);
   });
 
+  test('“Send to phone” shares the GPX via the Web Share API', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    // mock Web Share before the app loads so the button reveals and share is captured
+    await page.addInitScript(() => {
+      window.__shared = null;
+      Object.defineProperty(navigator, 'canShare', {
+        value: (d) => !!(d && d.files && d.files.length),
+        configurable: true,
+      });
+      Object.defineProperty(navigator, 'share', {
+        value: async (d) => {
+          const f = d.files[0];
+          window.__shared = { name: f.name, type: f.type, count: d.files.length };
+        },
+        configurable: true,
+      });
+    });
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    const share = page.locator('#btnShare');
+    await expect(share).toBeVisible();
+    await share.click();
+    await expect
+      .poll(() => page.evaluate(() => window.__shared))
+      .toEqual({ name: 'topo-route.gpx', type: 'application/gpx+xml', count: 1 });
+  });
+
   test('clear removes all waypoints and route', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);
