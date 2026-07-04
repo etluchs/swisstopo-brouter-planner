@@ -56,9 +56,9 @@ npm run report       # open the last HTML report
 ```
 
 `tests/planner.spec.js` covers: Leaflet bootstrap, that tiles are requested with
-the correct swisstopo URL shape, the OpenTopoMap fallback when tiles 404,
+the correct swisstopo LV95 URL shape, the warning shown when tiles 404,
 click-to-add, routed-leg → BRouter call + drawn path, direct-leg → dashed path
-with **no** BRouter call, leg toggling, and clear.
+with **no** BRouter call + swissAlti3D ascent, leg toggling, and clear.
 
 There's also an **opt-in smoke test** that hits the live swisstopo endpoint —
 useful for confirming tiles actually load in a real browser (the thing a
@@ -71,10 +71,12 @@ npm run test:smoke   # sets E2E_NETWORK=1; skipped otherwise
 ## Why tiles may look gray in some embeds
 
 If you drop `index.html` into a sandboxed iframe/preview that blocks third-party
-image requests, the tiles go gray even though the URLs are correct — both
-swisstopo and the OpenTopoMap fallback are external. Served from a normal origin
-(`npm run dev`, GitHub Pages, your own host) the swisstopo Landeskarte loads
-fine. The `test:smoke` test exists to prove exactly that.
+image requests, the tiles go gray even though the URLs are correct — the
+swisstopo tiles are external. Served from a normal origin (`npm run dev`, GitHub
+Pages, your own host) the swisstopo Landeskarte loads fine. The `test:smoke`
+test exists to prove exactly that. (The map now renders in the native Swiss grid
+LV95/EPSG:2056, so there's no Web-Mercator OpenTopoMap fallback — a mixed
+projection couldn't align.)
 
 ## Layout
 
@@ -94,12 +96,12 @@ playwright.config.js    boots server.mjs as webServer
 Base maps © swisstopo — keep the credit (already wired into the tile layer).
 swisstopo's WMTS is free for public geodata but discourages heavy scraping;
 review their terms of use for production volume. Routing data © OpenStreetMap
-contributors. OpenTopoMap fallback is CC-BY-SA.
+contributors (via BRouter). Elevation © swisstopo (swissAlti3D).
 
 ## Possible next steps
 
-- Elevation on direct legs by sampling swissAlti3D (swisstopo DEM height query).
-- Batch consecutive routed points into one BRouter call with `straight=` indices
-  for the direct ones, instead of one request per leg.
-- Native Swiss projection (LV95 / EPSG:2056) via proj4 if you want the true grid.
-- Deploy to GitHub Pages (it's fully static).
+- Single-call BRouter batching (`straight=` indices) to cut request *count* — the
+  routed legs already fetch concurrently, so this is about server load, and it
+  trades against the per-leg interaction model (toggle/highlight/elevation).
+- Configurable swisstopo overlays (public transport, hiking trails, …), like the
+  layer panel on map.geo.admin.ch.

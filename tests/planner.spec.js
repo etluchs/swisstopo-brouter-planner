@@ -62,16 +62,16 @@ test.describe('bootstrap', () => {
     await page.goto('/');
     await expect.poll(() => urls.length).toBeGreaterThan(0);
     expect(urls[0]).toMatch(
-      /ch\.swisstopo\.pixelkarte-farbe\/default\/current\/3857\/\d+\/\d+\/\d+\.jpeg/
+      /ch\.swisstopo\.pixelkarte-farbe\/default\/current\/2056\/\d+\/\d+\/\d+\.jpeg/
     );
   });
 
-  test('falls back to OpenTopoMap when swisstopo tiles fail', async ({ page }) => {
+  test('warns when swisstopo tiles fail to load', async ({ page }) => {
     await stubBrouter(page);
     await stubTiles(page, 404);
     await page.goto('/');
     await expect(page.locator('#warn')).toHaveClass(/show/, { timeout: 10_000 });
-    await expect(page.locator('#warn')).toContainText(/OpenTopoMap/);
+    await expect(page.locator('#warn')).toContainText(/swisstopo tiles didn.t load/i);
   });
 });
 

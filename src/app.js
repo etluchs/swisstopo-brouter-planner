@@ -1,28 +1,39 @@
-/* swisstopo raster (EPSG:3857 XYZ) base + BRouter router.
+/* swisstopo raster base (native LV95 / EPSG:2056) + BRouter router.
+   The map renders in the true Swiss projection so it matches the printed
+   Landeskarte grid with no Mercator distortion (proj4 + proj4leaflet).
    State: ordered waypoints; each carries `mode` for the leg leading INTO it
    ('route'|'direct'). Route is built per-leg, so direct legs never hit the
    router — that's how a path missing from OSM but visible on topo enters the track.
    Leaflet uses [lat,lng]; BRouter/GPX use [lng,lat]. Conversions are explicit. */
 
-const TILE = id => `https://wmts.geo.admin.ch/1.0.0/${id}/default/current/3857/{z}/{x}/{y}.jpeg`;
-const topo   = L.tileLayer(TILE('ch.swisstopo.pixelkarte-farbe'),{maxZoom:19,maxNativeZoom:18,attribution:'© swisstopo'});
-const aerial = L.tileLayer(TILE('ch.swisstopo.swissimage'),      {maxZoom:19,maxNativeZoom:19,attribution:'© swisstopo'});
+// LV95 / EPSG:2056 (Swiss oblique Mercator on Bessel). resolutions + origin are
+// swisstopo's WMTS tile grid; verified against a live central-Zürich tile.
+proj4.defs('EPSG:2056','+proj=somerc +lat_0=46.95240555555556 +lon_0=7.439583333333333 '
+  +'+k_0=1 +x_0=2600000 +y_0=1200000 +ellps=bessel '
+  +'+towgs84=674.374,15.056,405.346,0,0,0,0 +units=m +no_defs');
+const LV95_RES=[4000,3750,3500,3250,3000,2750,2500,2250,2000,1750,1500,1250,1000,750,650,
+  500,250,100,50,20,10,5,2.5,2,1.5,1,0.5,0.25,0.1];   // zoom 0..28 → metres/px
+const swissCRS=new L.Proj.CRS('EPSG:2056',proj4.defs('EPSG:2056'),{
+  resolutions:LV95_RES, origin:[2420000,1350000],
+  bounds:L.bounds([2420000,1030000],[2900000,1350000])});
 
-const map = L.map('map',{center:[47.376,8.541],zoom:13,maxZoom:19,layers:[topo]});
+const TILE = id => `https://wmts.geo.admin.ch/1.0.0/${id}/default/current/2056/{z}/{x}/{y}.jpeg`;
+const topo   = L.tileLayer(TILE('ch.swisstopo.pixelkarte-farbe'),{maxZoom:28,maxNativeZoom:27,attribution:'© swisstopo'});
+const aerial = L.tileLayer(TILE('ch.swisstopo.swissimage'),      {maxZoom:28,maxNativeZoom:28,attribution:'© swisstopo'});
+
+const map = L.map('map',{crs:swissCRS,center:[47.376,8.541],zoom:19,minZoom:8,maxZoom:28,layers:[topo]});
 const routeGroup = L.layerGroup().addTo(map);
 setTimeout(()=>map.invalidateSize(),200);
 
 // Safety net: if swisstopo tiles are blocked in this context (referrer/hotlink
-// protection on a sandboxed origin), swap the base to OpenTopoMap once, with a note.
-const fallback=L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-  {maxZoom:17,attribution:'© OpenTopoMap (CC-BY-SA), © OpenStreetMap contributors'});
+// protection on a sandboxed origin), warn once. There's no raster fallback now
+// that the map renders in native LV95 — OpenTopoMap is Web-Mercator-only, and
+// mixed projections can't align — but a real deployment loads swisstopo fine.
 let swissBlocked=false, topoErrs=0;
 topo.on('tileerror',()=>{
   if(swissBlocked || ++topoErrs<3) return;
   swissBlocked=true;
-  if(map.hasLayer(topo)) map.removeLayer(topo);
-  fallback.addTo(map);
-  showWarn('swisstopo tiles didn\u2019t load in this preview \u2014 almost certainly referrer/hotlink protection on the sandbox origin, not a bug in the endpoint. Showing OpenTopoMap as a stand-in. In a normal browser or your own deployment the swisstopo Landeskarte loads fine.');
+  showWarn('swisstopo tiles didn\u2019t load in this preview \u2014 almost certainly referrer/hotlink protection on the sandbox origin, not a bug in the endpoint. In a normal browser or your own deployment the swisstopo Landeskarte loads fine.');
 });
 
 // ---- state ----
@@ -247,9 +258,8 @@ document.getElementById('modeSeg').addEventListener('click',e=>{
 });
 document.getElementById('basesw').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
-  map.removeLayer(topo);map.removeLayer(aerial);map.removeLayer(fallback);
-  if(b.dataset.base==='topo'){(swissBlocked?fallback:topo).addTo(map);}
-  else{aerial.addTo(map);}
+  map.removeLayer(topo);map.removeLayer(aerial);
+  (b.dataset.base==='topo'?topo:aerial).addTo(map);
   [...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));
 });
 document.getElementById('profile').addEventListener('change',e=>{profile=e.target.value;legCache.clear();recompute();});
