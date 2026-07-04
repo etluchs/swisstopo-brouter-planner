@@ -326,13 +326,20 @@ function exportGpx(){
   a.href=URL.createObjectURL(new Blob([gpx],{type:GPX_TYPE}));
   a.download='topo-route.gpx';a.click();URL.revokeObjectURL(a.href);
 }
+// iOS picks share-sheet apps by UTI. It has no built-in mapping for the
+// application/gpx+xml MIME, so that resolves to a generic XML type and Garmin
+// Connect (which registers for the .gpx UTI) doesn't appear. With a generic MIME
+// iOS falls back to the filename extension to resolve the UTI — so on iOS we
+// share as octet-stream and let ".gpx" drive it. Elsewhere keep the true MIME.
+const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)
+  ||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 // Web Share (mobile): hand the .gpx file to the OS share sheet so it can go
 // straight to Garmin Connect / any app — no download→upload. Falls back to a
 // plain download where file-sharing isn't supported.
 async function shareGpx(){
   const gpx=buildGpx();
   if(!gpx){showWarn('Nothing to share yet.');return;}
-  const file=new File([gpx],'topo-route.gpx',{type:GPX_TYPE});
+  const file=new File([gpx],'topo-route.gpx',{type:isIOS?'application/octet-stream':GPX_TYPE});
   if(navigator.canShare && navigator.canShare({files:[file]})){
     try{ await navigator.share({files:[file],title:'topo-route',text:'Route from Topo Route Planner'}); }
     catch(err){ if(err && err.name!=='AbortError') exportGpx(); }   // ignore user-cancel; else download

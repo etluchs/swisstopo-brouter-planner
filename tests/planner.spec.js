@@ -235,6 +235,41 @@ test.describe('route editing', () => {
       .toEqual({ name: 'topo-route.gpx', type: 'application/gpx+xml', count: 1 });
   });
 
+  test.describe('web share on iOS', () => {
+    test.use({
+      userAgent:
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 ' +
+        '(KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
+    });
+    test('shares GPX as octet-stream so iOS resolves the .gpx UTI', async ({ page }) => {
+      await stubTiles(page);
+      await stubBrouter(page);
+      await page.addInitScript(() => {
+        window.__shared = null;
+        Object.defineProperty(navigator, 'canShare', {
+          value: (d) => !!(d && d.files && d.files.length),
+          configurable: true,
+        });
+        Object.defineProperty(navigator, 'share', {
+          value: async (d) => {
+            const f = d.files[0];
+            window.__shared = { name: f.name, type: f.type };
+          },
+          configurable: true,
+        });
+      });
+      await page.goto('/');
+      await expect(page.locator('.leaflet-container')).toBeVisible();
+      await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+      await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+      await page.locator('#btnShare').click();
+      // generic MIME → iOS uses the .gpx extension for the UTI (Garmin Connect)
+      await expect
+        .poll(() => page.evaluate(() => window.__shared))
+        .toEqual({ name: 'topo-route.gpx', type: 'application/octet-stream' });
+    });
+  });
+
   test('clear removes all waypoints and route', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);
