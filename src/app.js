@@ -112,27 +112,36 @@ async function recompute(){
   const my=++gen;
   renderLegList();
   if(waypoints.length<2){setRoute([]);setStats(0,0);showWarn('');return;}
-  const legs=[]; let dist=0,asc=0,failed=false; const directLegs=[];
+  // Kick every routed leg's BRouter fetch off at once (they were sequential),
+  // keeping one polyline per leg so the per-leg toggle/highlight/elevation model
+  // stays intact. `plan` preserves leg order; routed entries carry a settled
+  // promise so one failed leg can't reject the whole batch.
+  const directLegs=[]; const plan=[];
   for(let i=1;i<waypoints.length;i++){
-    const a=waypoints[i-1],b=waypoints[i],mode=b.mode;
-    if(mode==='direct'){
-      legs.push({mode:'direct',leg:i,latlngs:[[a.lat,a.lng],[b.lat,b.lng]]});
-      dist+=haversine([a.lng,a.lat],[b.lng,b.lat]);
-      directLegs.push({a,b});
+    const a=waypoints[i-1],b=waypoints[i];
+    if(b.mode==='direct'){ plan.push({mode:'direct',leg:i,a,b}); directLegs.push({a,b}); }
+    else plan.push({mode:'route',leg:i,a,b,p:fetchLeg(a,b).then(r=>({r}),err=>({err}))});
+  }
+  await Promise.all(plan.map(x=>x.p).filter(Boolean));
+  if(my!==gen)return;
+  const legs=[]; let dist=0,asc=0,failed=false;
+  for(const x of plan){
+    if(x.mode==='direct'){
+      legs.push({mode:'direct',leg:x.leg,latlngs:[[x.a.lat,x.a.lng],[x.b.lat,x.b.lng]]});
+      dist+=haversine([x.a.lng,x.a.lat],[x.b.lng,x.b.lat]);
+      continue;
+    }
+    const {r,err}=await x.p;                       // already settled by Promise.all above
+    if(err){
+      failed=true;
+      legs.push({mode:'error',leg:x.leg,latlngs:[[x.a.lat,x.a.lng],[x.b.lat,x.b.lng]]});
+      dist+=haversine([x.a.lng,x.a.lat],[x.b.lng,x.b.lat]);
     }else{
-      try{
-        const r=await fetchLeg(a,b); if(my!==gen)return;
-        legs.push({mode:'route',leg:i,latlngs:r.coords.map(toLatLng)});
-        asc+=r.ascend;
-        for(let k=1;k<r.coords.length;k++) dist+=haversine(r.coords[k-1],r.coords[k]);
-      }catch(err){
-        failed=true;
-        legs.push({mode:'error',leg:i,latlngs:[[a.lat,a.lng],[b.lat,b.lng]]});
-        dist+=haversine([a.lng,a.lat],[b.lng,b.lat]);
-      }
+      legs.push({mode:'route',leg:x.leg,latlngs:r.coords.map(toLatLng)});
+      asc+=r.ascend;
+      for(let k=1;k<r.coords.length;k++) dist+=haversine(r.coords[k-1],r.coords[k]);
     }
   }
-  if(my!==gen)return;
   setRoute(legs); setStats(dist,asc);
   showWarn(failed
     ? 'A routed leg failed — shown dashed red. On the public endpoint this is usually CORS; point the field at your own BRouter instance. Direct legs still work.'

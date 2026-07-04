@@ -101,6 +101,22 @@ test.describe('route editing', () => {
     await expect(page.locator('#statDist')).not.toHaveText('0.0');
   });
 
+  test('multiple routed legs each fetch and draw (concurrent)', async ({ page }) => {
+    let calls = 0;
+    await stubTiles(page);
+    await stubBrouter(page, () => (calls += 1));
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 200, y: 180 } });
+    await page.locator(MAP).click({ position: { x: 340, y: 260 } });
+    await page.locator(MAP).click({ position: { x: 470, y: 360 } });
+    // 3 waypoints => 2 routed legs => 2 drawn paths; both legs hit BRouter
+    // (>=2; rapid clicks can race the leg cache and refetch, which is fine)
+    await expect(page.locator('.leaflet-overlay-pane path')).toHaveCount(2);
+    await expect.poll(() => calls).toBeGreaterThanOrEqual(2);
+    await expect(page.locator('#legList li')).toHaveCount(3);
+  });
+
   test('a direct leg draws dashed WITHOUT calling BRouter', async ({ page }) => {
     let called = false;
     await stubTiles(page);
