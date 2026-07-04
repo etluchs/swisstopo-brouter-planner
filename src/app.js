@@ -332,24 +332,18 @@ function exportGpx(){
   a.href=URL.createObjectURL(new Blob([gpx],{type:GPX_TYPE}));
   a.download='topo-route.gpx';a.click();URL.revokeObjectURL(a.href);
 }
-// iOS picks share-sheet apps by UTI. It has no built-in mapping for the
-// application/gpx+xml MIME, so that resolves to a generic XML type and Garmin
-// Connect (which registers for the .gpx UTI) doesn't appear. With a generic MIME
-// iOS falls back to the filename extension to resolve the UTI — so on iOS we
-// share as octet-stream and let ".gpx" drive it. Elsewhere keep the true MIME.
-const isIOS=/iPad|iPhone|iPod/.test(navigator.userAgent)
-  ||(navigator.platform==='MacIntel'&&navigator.maxTouchPoints>1);
 // Web Share (mobile): hand the .gpx file to the OS share sheet so it can go
-// straight to Garmin Connect / any app — no download→upload. Falls back to a
-// plain download where file-sharing isn't supported.
+// straight to Garmin Connect / any app — no download→upload. Two things matter
+// on iOS: (1) the standard application/gpx+xml MIME, which resolves to the GPX
+// UTI (com.topografix.gpx) that Garmin's share extension activates for — a
+// generic MIME like octet-stream resolves to public.data and Garmin won't show;
+// (2) share ONLY the file — a title/text payload becomes a second shared item
+// and hides file-only targets like Garmin. Falls back to a download if unsupported.
 async function shareGpx(){
   const gpx=buildGpx();
   if(!gpx){showWarn('Nothing to share yet.');return;}
-  const file=new File([gpx],'topo-route.gpx',{type:isIOS?'application/octet-stream':GPX_TYPE});
+  const file=new File([gpx],'topo-route.gpx',{type:GPX_TYPE});
   if(navigator.canShare && navigator.canShare({files:[file]})){
-    // Share ONLY the file — no title/text. On iOS a text/title payload becomes a
-    // second shared item, and an app whose share extension activates only for a
-    // lone .gpx (Garmin Connect) then drops out of the share sheet entirely.
     try{ await navigator.share({files:[file]}); }
     catch(err){ if(err && err.name!=='AbortError') exportGpx(); }   // ignore user-cancel; else download
   }else exportGpx();
