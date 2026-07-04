@@ -347,7 +347,10 @@ async function shareGpx(){
   if(!gpx){showWarn('Nothing to share yet.');return;}
   const file=new File([gpx],'topo-route.gpx',{type:isIOS?'application/octet-stream':GPX_TYPE});
   if(navigator.canShare && navigator.canShare({files:[file]})){
-    try{ await navigator.share({files:[file],title:'topo-route',text:'Route from Topo Route Planner'}); }
+    // Share ONLY the file — no title/text. On iOS a text/title payload becomes a
+    // second shared item, and an app whose share extension activates only for a
+    // lone .gpx (Garmin Connect) then drops out of the share sheet entirely.
+    try{ await navigator.share({files:[file]}); }
     catch(err){ if(err && err.name!=='AbortError') exportGpx(); }   // ignore user-cancel; else download
   }else exportGpx();
 }

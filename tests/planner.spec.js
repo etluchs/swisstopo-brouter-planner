@@ -223,7 +223,12 @@ test.describe('route editing', () => {
       Object.defineProperty(navigator, 'share', {
         value: async (d) => {
           const f = d.files[0];
-          window.__shared = { name: f.name, type: f.type, count: d.files.length };
+          window.__shared = {
+            name: f.name,
+            type: f.type,
+            count: d.files.length,
+            keys: Object.keys(d).sort().join(','),
+          };
         },
         configurable: true,
       });
@@ -237,7 +242,9 @@ test.describe('route editing', () => {
     await share.click();
     await expect
       .poll(() => page.evaluate(() => window.__shared))
-      .toEqual({ name: 'topo-route.gpx', type: 'application/gpx+xml', count: 1 });
+      // keys must be exactly "files": a title/text payload would add a second
+      // shared item on iOS and hide file-only targets (e.g. Garmin Connect).
+      .toEqual({ name: 'topo-route.gpx', type: 'application/gpx+xml', count: 1, keys: 'files' });
   });
 
   test.describe('web share on iOS', () => {
