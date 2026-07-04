@@ -16,7 +16,7 @@ endpoint. No build step.
 
 ## Thanks
 
-These are just some vibe-coded lines of JS on top of:
+These are just some vibe-coded (clauded) lines of JS on top of:
   - [BRouter](https://brouter.de)
   - [Swisstopo OGD](https://www.swisstopo.admin.ch/de/kostenlose-geobasisdaten-ogd)
 
