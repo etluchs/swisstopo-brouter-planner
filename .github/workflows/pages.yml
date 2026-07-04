@@ -27,10 +27,15 @@ jobs:
       - uses: actions/checkout@v4
       - name: Assemble static site
         # Publish only the app, not the repo's tooling/tests/issue tracker.
+        # Stamp a cache-busting ?v=<sha> onto the local assets so a new deploy is
+        # never masked by a stale cached app.js/styles.css (Pages caches for 10 min).
         run: |
           mkdir -p _site
-          cp index.html _site/
           cp -r src _site/
+          V="${GITHUB_SHA::8}"
+          sed -e "s#\./src/app\.js#./src/app.js?v=$V#g" \
+              -e "s#\./src/styles\.css#./src/styles.css?v=$V#g" \
+              index.html > _site/index.html
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
