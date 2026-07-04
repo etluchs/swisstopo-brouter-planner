@@ -53,6 +53,49 @@ function renderOverlayList(){
     lab.append(cb,span); box.append(lab);
   });
 }
+
+// ---- feature identify (right-click / long-press) ----
+// Left-click adds waypoints, so identify rides on contextmenu (fired by both
+// right-click and touch long-press). Queries the enabled overlays plus place
+// names, so it always returns something useful. swisstopo identify is LV95-native.
+const IDENTIFY_API='https://api3.geo.admin.ch/rest/services/all/MapServer/identify';
+const IDENTIFY_EXTRA=['ch.swisstopo.swissnames3d'];   // place-name context, always on
+map.on('contextmenu',e=>{L.DomEvent.preventDefault(e.originalEvent);identifyAt(e.latlng);});
+async function identifyAt(latlng){
+  const active=OVERLAYS.filter(o=>overlayLayers.has(o.id)&&map.hasLayer(overlayLayers.get(o.id))).map(o=>o.id);
+  const layers=[...active,...IDENTIFY_EXTRA];
+  const pop=L.popup({className:'id-pop',maxWidth:260,autoPan:false})
+    .setLatLng(latlng).setContent('Identifying…').openOn(map);
+  try{
+    const [E,N]=wgs84ToLv95(latlng.lng,latlng.lat);
+    const b=map.getBounds();
+    const sw=wgs84ToLv95(b.getWest(),b.getSouth()), ne=wgs84ToLv95(b.getEast(),b.getNorth());
+    const sz=map.getSize();
+    const url=`${IDENTIFY_API}?geometry=${E.toFixed(1)},${N.toFixed(1)}&geometryType=esriGeometryPoint`
+      +`&layers=all:${layers.join(',')}`
+      +`&mapExtent=${sw[0].toFixed(1)},${sw[1].toFixed(1)},${ne[0].toFixed(1)},${ne[1].toFixed(1)}`
+      +`&imageDisplay=${sz.x},${sz.y},96&tolerance=8&sr=2056&lang=en`;
+    const res=await fetch(url);
+    if(!res.ok) throw new Error('identify '+res.status);
+    const data=await res.json();
+    pop.setContent(identifyHtml(data.results||[]));
+  }catch(_){ pop.setContent('Couldn’t reach the swisstopo identify service.'); }
+}
+const featLabel=a=>(a&&(a.name||a.label||a.bezeichnung||a.gemname))||'';
+const escapeHtml=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function identifyHtml(results){
+  if(!results.length) return 'Nothing to identify here.';
+  const seen=new Set(), rows=[];
+  for(const r of results){
+    const name=featLabel(r.attributes)||'(unnamed)';
+    const key=(r.layerBodId||'')+'|'+name;
+    if(seen.has(key)) continue; seen.add(key);
+    rows.push(`<div class="id-row"><span class="id-layer">${escapeHtml(r.layerName||r.layerBodId||'')}</span>`
+      +`${escapeHtml(name)}</div>`);
+    if(rows.length>=6) break;
+  }
+  return `<div class="id-list">${rows.join('')}</div>`;
+}
 const routeGroup = L.layerGroup().addTo(map);
 setTimeout(()=>map.invalidateSize(),200);
 

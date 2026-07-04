@@ -1,0 +1,14 @@
+{
+  "results": [
+    {
+      "layerBodId": "ch.bav.haltestellen-oev",
+      "layerName": "Public transport stops",
+      "attributes": { "name": "Zürich HB SZU" }
+    },
+    {
+      "layerBodId": "ch.swisstopo.swissnames3d",
+      "layerName": "Names",
+      "attributes": { "label": "Münsterhof" }
+    }
+  ]
+}

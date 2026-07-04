@@ -7,6 +7,9 @@ const leg = JSON.parse(
 const profile = JSON.parse(
   readFileSync(new URL('./fixtures/swisstopo-profile.json', import.meta.url), 'utf-8')
 );
+const identify = JSON.parse(
+  readFileSync(new URL('./fixtures/swisstopo-identify.json', import.meta.url), 'utf-8')
+);
 
 // 1x1 transparent PNG used to satisfy tile <img> loads deterministically.
 const PNG = Buffer.from(
@@ -184,6 +187,22 @@ test.describe('route editing', () => {
     // unchecking removes the layer (no assertion beyond no-throw / stays interactive)
     await veloland.uncheck();
     await expect(veloland).not.toBeChecked();
+  });
+
+  test('right-click identifies features without adding a waypoint', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.route(/MapServer\/identify/, (r) => r.fulfill({ json: identify }));
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 480, y: 300 }, button: 'right' });
+    const popup = page.locator('.leaflet-popup-content');
+    await expect(popup).toBeVisible();
+    await expect(popup).toContainText('Zürich HB SZU');
+    await expect(popup).toContainText('Münsterhof');
+    // right-click must NOT drop a waypoint
+    await expect(page.locator('.leaflet-marker-icon')).toHaveCount(0);
+    await expect(page.locator('#legList li')).toHaveCount(0);
   });
 
   test('clear removes all waypoints and route', async ({ page }) => {
