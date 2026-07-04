@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "swisstopo_brouter_planner",
+  "project_id": "b629da8d-698b-45f7-987b-e33fde2bb2d9"
+}
