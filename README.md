@@ -14,7 +14,19 @@ route.
 Everything runs client-side: Leaflet + swisstopo raster tiles + a BRouter HTTP
 endpoint. No build step.
 
+## Thanks
+
+These are just some vibe-coded lines of JS on top of:
+  - [BRouter](https://brouter.de)
+  - [Swisstopo OGD](https://www.swisstopo.admin.ch/de/kostenlose-geobasisdaten-ogd)
+
 ## Quick start
+
+### Just use it
+
+Goto [the deployed version](https://etluchs.github.io/swisstopo-brouter-planner/).
+
+### Run from sources
 
 ```bash
 npm install          # only needed for the tests
