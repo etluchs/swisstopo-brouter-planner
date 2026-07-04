@@ -1,0 +1,22 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "creator": "BRouter-fixture",
+        "track-length": "1240",
+        "filtered ascend": "56",
+        "total-time": "372"
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [8.5410, 47.3760],
+          [8.5445, 47.3788],
+          [8.5502, 47.3821]
+        ]
+      }
+    }
+  ]
+}

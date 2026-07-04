@@ -1,0 +1,18 @@
+{
+  "name": "swisstopo-brouter-planner",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "In-browser bike route planner: swisstopo topo basemap + BRouter, with hand-drawn 'direct' legs for paths missing from OSM.",
+  "scripts": {
+    "dev": "node server.mjs",
+    "test": "playwright test",
+    "test:headed": "playwright test --headed",
+    "test:ui": "playwright test --ui",
+    "test:smoke": "E2E_NETWORK=1 playwright test smoke",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}

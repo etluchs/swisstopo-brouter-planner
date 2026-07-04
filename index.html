@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="referrer" content="no-referrer" />
+<title>Topo Route Planner · swisstopo + BRouter</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<link rel="stylesheet" href="./src/styles.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <div id="panel">
+    <header>
+      <h1>Topo Route Planner</h1>
+      <div class="sub">Swiss topo base · <b>routed</b> legs follow OSM via BRouter · <i>direct</i> legs trace paths by hand for trails OSM is missing.</div>
+    </header>
+    <div class="scroll">
+
+      <div class="grp">
+        <label class="h">New leg drawn as</label>
+        <div class="seg" id="modeSeg">
+          <button data-mode="route" class="on"><span class="dash"></span>Routed</button>
+          <button data-mode="direct"><span class="dash d"></span>Direct</button>
+        </div>
+        <div class="hint">Click the map to add points. Routed uses BRouter; direct draws a straight line — drop several to trace a curve you see on the map. Click an existing leg to insert a point.</div>
+      </div>
+
+      <div class="grp">
+        <div class="stats">
+          <div class="stat"><div class="v" id="statDist">0.0</div><div class="k">km total</div></div>
+          <div class="stat"><div class="v" id="statAsc">0</div><div class="k">m ascent*</div></div>
+        </div>
+        <div class="hint">*ascent summed from routed legs only; direct legs carry no elevation.</div>
+      </div>
+
+      <div class="grp">
+        <label class="h">Legs</label>
+        <ol class="legs" id="legList"></ol>
+        <div class="empty" id="legEmpty">No points yet. Click the map to start.</div>
+      </div>
+
+      <div class="grp">
+        <div class="row">
+          <button class="act" id="btnUndo">Undo point</button>
+          <button class="act" id="btnClear">Clear</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="act primary" id="btnGpx">Export GPX</button>
+        </div>
+      </div>
+
+      <div class="grp">
+        <label class="h">Routing profile</label>
+        <select id="profile">
+          <option value="trekking">trekking</option>
+          <option value="fastbike">fastbike</option>
+          <option value="gravel">gravel</option>
+          <option value="mtb">mtb</option>
+          <option value="shortest">shortest</option>
+        </select>
+        <div class="hint">Profile must exist on your BRouter server.</div>
+      </div>
+
+      <div class="grp">
+        <label class="h">BRouter endpoint</label>
+        <input type="text" id="endpoint" value="https://brouter.de/brouter" spellcheck="false" />
+        <div class="hint">Self-host: <code>docker run -p 17777:17777 brouter</code> → <code>http://localhost:17777/brouter</code>. The public host may block cross-origin calls; your own instance won't.</div>
+        <div class="warn" id="warn"></div>
+      </div>
+
+    </div>
+  </div>
+  <div id="map">
+    <div class="basesw" id="basesw">
+      <button data-base="topo" class="on">Topo</button>
+      <button data-base="aerial">Aerial</button>
+    </div>
+    <div class="modeflag" id="modeflag">Adding <b class="r">routed</b> points</div>
+  </div>
+</div>
+
+<script src="./src/app.js"></script>
+</body>
+</html>
