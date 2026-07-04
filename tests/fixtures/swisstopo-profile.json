@@ -1,0 +1,6 @@
+[
+  { "alts": { "COMB": 500.0, "DTM2": 500.0 }, "dist": 0,    "easting": 2600000, "northing": 1200000 },
+  { "alts": { "COMB": 530.0, "DTM2": 530.0 }, "dist": 500,  "easting": 2600500, "northing": 1200000 },
+  { "alts": { "COMB": 525.0, "DTM2": 525.0 }, "dist": 750,  "easting": 2600750, "northing": 1200000 },
+  { "alts": { "COMB": 560.0, "DTM2": 560.0 }, "dist": 1000, "easting": 2601000, "northing": 1200000 }
+]

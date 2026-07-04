@@ -4,6 +4,9 @@ import { readFileSync } from 'node:fs';
 const leg = JSON.parse(
   readFileSync(new URL('./fixtures/brouter-leg.json', import.meta.url), 'utf-8')
 );
+const profile = JSON.parse(
+  readFileSync(new URL('./fixtures/swisstopo-profile.json', import.meta.url), 'utf-8')
+);
 
 // 1x1 transparent PNG used to satisfy tile <img> loads deterministically.
 const PNG = Buffer.from(
@@ -25,6 +28,14 @@ async function stubBrouter(page, onCall) {
   await page.route(/\/brouter/, (r) => {
     onCall?.();
     return r.fulfill({ json: leg });
+  });
+}
+// swisstopo DEM profile service used by direct-leg elevation; stubbed so the
+// suite stays deterministic and offline.
+async function stubHeight(page, onCall) {
+  await page.route(/profile\.json/, (r) => {
+    onCall?.();
+    return r.fulfill({ json: profile });
   });
 }
 const MAP = '#map';
@@ -94,6 +105,7 @@ test.describe('route editing', () => {
     let called = false;
     await stubTiles(page);
     await stubBrouter(page, () => (called = true));
+    await stubHeight(page);
     await page.goto('/');
     await expect(page.locator('.leaflet-container')).toBeVisible();
     await page.locator('#modeSeg button[data-mode="direct"]').click();
@@ -103,6 +115,21 @@ test.describe('route editing', () => {
     await expect(path).toBeVisible();
     await expect(path).toHaveAttribute('stroke-dasharray', /\d/);
     expect(called).toBe(false);
+  });
+
+  test('a direct leg samples the swisstopo DEM for ascent', async ({ page }) => {
+    let heightCalled = false;
+    await stubTiles(page);
+    await stubBrouter(page);
+    await stubHeight(page, () => (heightCalled = true));
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator('#modeSeg button[data-mode="direct"]').click();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    // fixture profile climbs 500→530→525→560 ⇒ +30 +35 = 65 m of ascent
+    await expect(page.locator('#statAsc')).toHaveText('65');
+    expect(heightCalled).toBe(true);
   });
 
   test('toggling a leg switches it to direct', async ({ page }) => {

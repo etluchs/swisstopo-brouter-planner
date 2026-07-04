@@ -80,16 +80,45 @@ async function fetchLeg(a,b){
   legCache.set(key,out); return out;
 }
 
+// ---- elevation for direct legs ----
+// Routed legs get ascent from BRouter; hand-drawn direct legs sample the
+// swisstopo swissAlti3D DEM via the profile service. WGS84->LV95 uses swisstopo's
+// approximate formula (sub-metre over CH, so no proj4 dependency).
+const heightApi='https://api3.geo.admin.ch/rest/services/profile.json';
+const directCache=new Map();   // directKey -> ascend metres
+function wgs84ToLv95(lng,lat){
+  const p=(lat*3600-169028.66)/10000, l=(lng*3600-26782.5)/10000;
+  const E=2600072.37+211455.93*l-10938.51*l*p-0.36*l*p*p-44.54*l*l*l;
+  const N=1200147.07+308807.95*p+3745.25*l*l+76.63*p*p-194.56*l*l*p+119.79*p*p*p;
+  return [E,N];
+}
+const directKey=(a,b)=>`${a.lng.toFixed(6)},${a.lat.toFixed(6)}|${b.lng.toFixed(6)},${b.lat.toFixed(6)}`;
+async function fetchDirectAscend(a,b){
+  const key=directKey(a,b);
+  if(directCache.has(key)) return directCache.get(key);
+  const dist=haversine([a.lng,a.lat],[b.lng,b.lat]);
+  const n=Math.max(2,Math.min(200,Math.round(dist/50)));   // ~1 sample / 50 m
+  const geom=JSON.stringify({type:'LineString',
+    coordinates:[wgs84ToLv95(a.lng,a.lat),wgs84ToLv95(b.lng,b.lat)]});
+  const res=await fetch(`${heightApi}?geom=${encodeURIComponent(geom)}&sr=2056&nbPoints=${n}`);
+  if(!res.ok) throw new Error('height '+res.status);   // don't cache failures — let a later pass retry
+  const pts=await res.json();
+  let asc=0;
+  for(let k=1;k<pts.length;k++){const d=pts[k].alts.COMB-pts[k-1].alts.COMB;if(d>0)asc+=d;}
+  directCache.set(key,asc); return asc;
+}
+
 async function recompute(){
   const my=++gen;
   renderLegList();
   if(waypoints.length<2){setRoute([]);setStats(0,0);showWarn('');return;}
-  const legs=[]; let dist=0,asc=0,failed=false;
+  const legs=[]; let dist=0,asc=0,failed=false; const directLegs=[];
   for(let i=1;i<waypoints.length;i++){
     const a=waypoints[i-1],b=waypoints[i],mode=b.mode;
     if(mode==='direct'){
       legs.push({mode:'direct',leg:i,latlngs:[[a.lat,a.lng],[b.lat,b.lng]]});
       dist+=haversine([a.lng,a.lat],[b.lng,b.lat]);
+      directLegs.push({a,b});
     }else{
       try{
         const r=await fetchLeg(a,b); if(my!==gen)return;
@@ -108,6 +137,13 @@ async function recompute(){
   showWarn(failed
     ? 'A routed leg failed — shown dashed red. On the public endpoint this is usually CORS; point the field at your own BRouter instance. Direct legs still work.'
     : '');
+  // Direct-leg elevation is best-effort and independent of the drawn geometry:
+  // fetch it after the path is on screen, then fold it into the ascent stat.
+  if(directLegs.length){
+    const adds=await Promise.all(directLegs.map(({a,b})=>fetchDirectAscend(a,b).catch(()=>0)));
+    if(my!==gen)return;
+    setStats(dist,asc+adds.reduce((s,v)=>s+v,0));
+  }
 }
 
 function setRoute(legs){
