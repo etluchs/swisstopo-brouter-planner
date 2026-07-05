@@ -209,6 +209,7 @@ async function fetchDirectAscend(a,b){
 // One swissAlti3D profile for the entire route (routed + direct legs), POSTed so
 // the full geometry fits. Best-effort and cached; the ascent stat is unchanged.
 const PROFILE_API='https://api3.geo.admin.ch/rest/services/profile.json';
+const STEEP_GRADE=0.18;         // rise/run above which an *ascent* is flagged on the profile
 const profileCache=new Map();   // route signature -> [{d,e}]
 let profileMarker=null;
 const routeSig=()=>waypoints.map(w=>`${w.lng.toFixed(5)},${w.lat.toFixed(5)},${w.mode}`).join('|');
@@ -248,12 +249,34 @@ function renderProfile(prof,flat){
   const es=prof.map(p=>p.e), eMin=Math.min(...es), eMax=Math.max(...es), eRange=Math.max(1,eMax-eMin);
   const X=d=>(d/dMax)*W, Y=e=>H-3-((e-eMin)/eRange)*(H-6);
   const line=prof.map(p=>`${X(p.d).toFixed(1)},${Y(p.e).toFixed(1)}`).join(' ');
+  // Flag ascents steeper than STEEP_GRADE: collect contiguous runs of segments
+  // whose rise/run exceeds the threshold and overlay them in the warning colour,
+  // and tally their length so the meta line can call out how much steep climbing
+  // the route holds. Descents never count — this marks *ascents*.
+  const steepRuns=[]; let run=null, steepDist=0;
+  for(let i=1;i<prof.length;i++){
+    const dd=prof[i].d-prof[i-1].d;
+    const grade=dd>0?(prof[i].e-prof[i-1].e)/dd:0;
+    if(grade>STEEP_GRADE){
+      steepDist+=dd;
+      if(!run) run=[`${X(prof[i-1].d).toFixed(1)},${Y(prof[i-1].e).toFixed(1)}`];
+      run.push(`${X(prof[i].d).toFixed(1)},${Y(prof[i].e).toFixed(1)}`);
+    }else if(run){steepRuns.push(run);run=null;}
+  }
+  if(run) steepRuns.push(run);
+  const steepOverlay=steepRuns.map(r=>`<polyline class="prof-steep" points="${r.join(' ')}"/>`).join('');
+  const steepBadge = steepDist>0
+    ? `<span class="prof-steep-lbl" title="ascent steeper than ${Math.round(STEEP_GRADE*100)}%">`
+      +`⚠ ${steepDist<1000?Math.round(steepDist)+' m':(steepDist/1000).toFixed(1)+' km'} ≥${Math.round(STEEP_GRADE*100)}%</span>`
+    : '';
   box.innerHTML=
     `<svg id="profSvg" class="prof" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`
     +`<polygon class="prof-area" points="0,${H} ${line} ${W},${H}"/>`
     +`<polyline class="prof-line" points="${line}"/>`
+    +steepOverlay
     +`<line id="profCross" class="prof-cross" x1="0" y1="0" x2="0" y2="${H}" style="display:none"/></svg>`
     +`<div class="prof-meta"><span id="profRead">${Math.round(eMin)}–${Math.round(eMax)} m</span>`
+    +steepBadge
     +`<span>${(dMax/1000).toFixed(1)} km</span></div>`;
   // hover the chart → readout + a marker on the map at that distance
   const svg=document.getElementById('profSvg'),cross=document.getElementById('profCross'),read=document.getElementById('profRead');

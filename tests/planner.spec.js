@@ -232,6 +232,45 @@ test.describe('route editing', () => {
     await expect(page.locator('#profile svg.prof')).toBeVisible();
   });
 
+  test('flags ascents steeper than 18% on the elevation profile', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    // Override the shared profile stub with one that climbs 500→560 over 200 m
+    // (30% grade ⇒ steep) then eases to 562 over 500 m (0.4% ⇒ gentle). Only the
+    // first segment should be marked, and the badge should call out its length.
+    await page.route(/profile\.json/, (r) =>
+      r.fulfill({
+        json: [
+          { alts: { COMB: 500.0 }, dist: 0 },
+          { alts: { COMB: 560.0 }, dist: 200 },
+          { alts: { COMB: 562.0 }, dist: 700 },
+        ],
+      })
+    );
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#profile svg.prof')).toBeVisible();
+    // exactly one steep run marked, and the badge reports its 200 m length
+    await expect(page.locator('#profile .prof-steep')).toHaveCount(1);
+    await expect(page.locator('#profile .prof-steep-lbl')).toContainText('200 m');
+    await expect(page.locator('#profile .prof-steep-lbl')).toContainText('18%');
+  });
+
+  test('a gentle route shows no steep-ascent marker', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    // default fixture tops out at ~14% grade — never crosses the 18% threshold
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#profile svg.prof')).toBeVisible();
+    await expect(page.locator('#profile .prof-steep')).toHaveCount(0);
+    await expect(page.locator('#profile .prof-steep-lbl')).toHaveCount(0);
+  });
+
   test('“Send to phone” shares the GPX via the Web Share API', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);
