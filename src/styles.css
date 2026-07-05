@@ -54,8 +54,11 @@
   .prof-area{fill:var(--alpine);opacity:.13;stroke:none}
   .prof-line{fill:none;stroke:var(--alpine);stroke-width:1.5;vector-effect:non-scaling-stroke}
   .prof-cross{stroke:var(--ink);stroke-width:1;opacity:.45;vector-effect:non-scaling-stroke}
+  .prof-steep{fill:none;stroke:var(--error);stroke-width:2.5;stroke-linecap:round;
+    stroke-linejoin:round;vector-effect:non-scaling-stroke}
   .prof-meta{display:flex;justify-content:space-between;margin-top:5px;
     font-family:var(--data);font-size:10.5px;color:var(--muted)}
+  .prof-steep-lbl{color:var(--error);font-weight:600}
   .stat .v{font-family:var(--data);font-size:19px;font-weight:600;line-height:1}
   .stat .k{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-top:4px}
 
