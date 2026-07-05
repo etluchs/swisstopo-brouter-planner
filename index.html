@@ -15,9 +15,21 @@
 <div id="app">
   <div id="panel">
     <header>
-      <h1>Topo Route Planner</h1>
-      <div class="sub">Swiss topo base · <b>routed</b> legs follow OSM via BRouter · <i>direct</i> legs trace paths by hand for trails OSM is missing.</div>
+      <div class="htext">
+        <h1>Topo Route Planner</h1>
+        <div class="sub">Swiss topo base · <b>routed</b> legs follow OSM via BRouter · <i>direct</i> legs trace paths by hand for trails OSM is missing.</div>
+      </div>
+      <button id="btnMin" class="min-toggle" title="Minimize panel" aria-label="Minimize panel">«</button>
     </header>
+
+    <!-- Compact readout shown only while the panel is minimized: the numbers you
+         watch while drawing (distance, ascent) plus a quick undo. -->
+    <div id="miniBar" class="minibar">
+      <div class="mstat"><span class="mv" id="statDistMin">0.0</span><span class="mk">km</span></div>
+      <div class="mstat"><span class="mv" id="statAscMin">0</span><span class="mk">m ↑</span></div>
+      <button class="act" id="btnUndoMin">Undo</button>
+    </div>
+
     <div class="scroll">
 
       <div class="grp">

@@ -381,4 +381,41 @@ test.describe('route editing', () => {
     await expect(page.locator('#profile')).toHaveValue('mtb');
     await expect(page.locator('#legList .mini.direct')).toHaveCount(1);
   });
+
+  test('minimize collapses the panel to the compact card and restores', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    // full panel: scroll content visible, mini bar hidden
+    await expect(page.locator('.scroll')).toBeVisible();
+    await expect(page.locator('#miniBar')).toBeHidden();
+    await page.locator('#btnMin').click();
+    // minimized: mini bar shows, full content hidden, map got wider
+    await expect(page.locator('#app')).toHaveClass(/\bmin\b/);
+    await expect(page.locator('#miniBar')).toBeVisible();
+    await expect(page.locator('.scroll')).toBeHidden();
+    await page.locator('#btnMin').click();
+    await expect(page.locator('#app')).not.toHaveClass(/\bmin\b/);
+    await expect(page.locator('.scroll')).toBeVisible();
+    await expect(page.locator('#miniBar')).toBeHidden();
+  });
+
+  test('the minimized card mirrors distance/ascent and its undo works', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    await page.locator('#btnMin').click();
+    // the compact readout shows the same distance the full panel computed
+    await expect(page.locator('#statDistMin')).toHaveText(
+      await page.locator('#statDist').textContent()
+    );
+    // undo from the mini bar drops the last waypoint
+    await page.locator('#btnUndoMin').click();
+    await expect(page.locator('#legList li')).toHaveCount(1);
+  });
 });

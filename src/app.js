@@ -431,8 +431,11 @@ function emphasizeLeg(i,on){
 
 // ---- panel ----
 function setStats(distM,asc){
-  document.getElementById('statDist').textContent=(distM/1000).toFixed(1);
-  document.getElementById('statAsc').textContent=Math.round(asc);
+  const km=(distM/1000).toFixed(1), m=String(Math.round(asc));
+  document.getElementById('statDist').textContent=km;
+  document.getElementById('statAsc').textContent=m;
+  document.getElementById('statDistMin').textContent=km;   // mirror into the minimized readout
+  document.getElementById('statAscMin').textContent=m;
 }
 function renderLegList(){
   const ol=document.getElementById('legList');
@@ -522,7 +525,25 @@ document.getElementById('basesw').addEventListener('click',e=>{
 });
 document.getElementById('profile').addEventListener('change',e=>{profile=e.target.value;legCache.clear();recompute();});
 document.getElementById('endpoint').addEventListener('change',e=>{endpoint=e.target.value.trim();legCache.clear();recompute();});
-document.getElementById('btnUndo').onclick=()=>{if(waypoints.length){waypoints.pop();syncMarkers();recompute();}};
+function undoPoint(){if(waypoints.length){waypoints.pop();syncMarkers();recompute();}}
+document.getElementById('btnUndo').onclick=undoPoint;
+document.getElementById('btnUndoMin').onclick=undoPoint;
+
+// ---- panel minimize ----
+// Collapse the sidebar to a small floating card (dist/ascent/undo) so the map
+// gets the full width while drawing. The map is a flex sibling, so its size
+// changes the instant the panel leaves the flow — tell Leaflet to re-measure.
+function setMinimized(on){
+  document.getElementById('app').classList.toggle('min',on);
+  const b=document.getElementById('btnMin'), lbl=on?'Expand panel':'Minimize panel';
+  b.innerHTML=on?'»':'«';
+  b.title=lbl; b.setAttribute('aria-label',lbl);
+  try{ localStorage.setItem('panelMin',on?'1':'0'); }catch(_){}
+  requestAnimationFrame(()=>map.invalidateSize());
+}
+document.getElementById('btnMin').onclick=()=>
+  setMinimized(!document.getElementById('app').classList.contains('min'));
+try{ if(localStorage.getItem('panelMin')==='1') setMinimized(true); }catch(_){}
 document.getElementById('btnClear').onclick=()=>{waypoints=[];legCache.clear();syncMarkers();recompute();};
 document.getElementById('btnGpx').onclick=exportGpx;
 const btnShare=document.getElementById('btnShare');

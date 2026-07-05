@@ -8,13 +8,39 @@
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%;font-family:var(--body);color:var(--ink);background:var(--paper)}
-  #app{display:flex;height:100%}
+  #app{display:flex;height:100%;position:relative}
   #map{flex:1 1 auto;min-width:0;position:relative}
 
   #panel{flex:0 0 340px;max-width:340px;display:flex;flex-direction:column;
     background:var(--panel);border-right:1px solid var(--line);overflow:hidden}
-  header{padding:16px 18px 12px;border-bottom:1px solid var(--line)}
+  header{padding:16px 18px 12px;border-bottom:1px solid var(--line);
+    display:flex;align-items:flex-start;gap:10px}
+  header .htext{flex:1;min-width:0}
   header h1{margin:0;font-size:15px;letter-spacing:.02em;font-weight:650}
+
+  .min-toggle{flex:0 0 auto;border:1px solid var(--line);background:var(--paper);color:var(--muted);
+    border-radius:6px;width:26px;height:26px;font-size:15px;line-height:1;cursor:pointer;padding:0}
+  .min-toggle:hover{border-color:var(--muted);color:var(--ink)}
+  .min-toggle:focus-visible{outline:2px solid var(--alpine);outline-offset:1px}
+
+  /* Minimized: the panel leaves the flex flow and floats as a small card at the
+     bottom-left (clear of Leaflet's top-left zoom control and the base-map/mode
+     chips up top), so the map claims the full width. Only the compact header and
+     the mini readout show. */
+  #miniBar{display:none}
+  #app.min #panel{position:absolute;left:10px;bottom:10px;top:auto;z-index:600;
+    flex:0 0 auto;width:auto;max-width:min(84vw,320px);height:auto;
+    border:1px solid var(--line);border-radius:10px;box-shadow:0 2px 12px rgba(0,0,0,.18)}
+  #app.min #panel header{border-bottom:0;padding:9px 10px 9px 12px;align-items:center}
+  #app.min #panel .sub{display:none}
+  #app.min .scroll{display:none}
+  #app.min #miniBar{display:flex}
+
+  .minibar{align-items:center;gap:15px;padding:10px 12px 12px;border-top:1px solid var(--line)}
+  .mstat{display:flex;align-items:baseline;gap:4px}
+  .mstat .mv{font-family:var(--data);font-size:17px;font-weight:600;line-height:1}
+  .mstat .mk{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  #miniBar .act{margin-left:auto;flex:0 0 auto;padding:6px 11px}
   header .sub{margin-top:3px;font-size:11.5px;color:var(--muted);line-height:1.4}
   header .sub b{color:var(--route);font-weight:600}
   header .sub i{color:var(--direct);font-style:normal;font-weight:600}
