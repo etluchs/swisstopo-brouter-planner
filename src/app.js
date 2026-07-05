@@ -109,7 +109,9 @@ function identifyHtml(results){
   return `<div class="id-list">${rows.join('')}</div>`;
 }
 const routeGroup = L.layerGroup().addTo(map);
-setTimeout(()=>map.invalidateSize(),200);
+// Size the map, then restore any route encoded in the URL hash (fitBounds needs
+// a known map size to pick the right zoom, so both wait for the same tick).
+setTimeout(()=>{map.invalidateSize();loadFromUrl();},200);
 
 // Safety net: if swisstopo tiles are blocked in this context (referrer/hotlink
 // protection on a sandboxed origin), warn once. There's no raster fallback now
@@ -137,6 +139,50 @@ function haversine(a,b){const R=6371000,r=Math.PI/180,dLat=(b[1]-a[1])*r,dLon=(b
   return 2*R*Math.asin(Math.sqrt(s));}
 const pinColor=i=>i===0?getCss('--start'):i===waypoints.length-1?getCss('--end'):getCss('--via');
 const wpIcon=c=>L.divIcon({className:'',html:`<div class="wp" style="background:${c}"></div>`,iconSize:[16,16],iconAnchor:[8,8]});
+
+// ---- URL bookmarking ----
+// The whole route reduces to waypoints (lat,lng,mode) + routing profile; every
+// other bit of state recomputes from those. We keep that in the URL *hash* (not
+// query params) so it never hits a server — no length ceiling for bookmarks, and
+// coordinates stay out of request logs. 5 decimals ≈ 1 m, finer than the map needs.
+// The hash is rewritten (replaceState, no history spam) on every recompute, so the
+// address bar / any bookmark always reflects the current route.
+function serializeState(){
+  if(!waypoints.length) return '';
+  const w=waypoints.map(p=>`${p.lat.toFixed(5)},${p.lng.toFixed(5)},${p.mode==='direct'?'d':'r'}`).join(';');
+  return `#p=${encodeURIComponent(profile)}&w=${w}`;
+}
+function syncUrl(){
+  const h=serializeState();
+  history.replaceState(null,'',h||location.pathname+location.search);
+}
+function parseState(hash){
+  const h=(hash||'').replace(/^#/,'');
+  if(!h) return null;
+  const params=new URLSearchParams(h);
+  const w=params.get('w'); if(!w) return null;
+  const wps=[];
+  for(const tok of w.split(';')){
+    const [lat,lng,m]=tok.split(',');
+    const la=parseFloat(lat),ln=parseFloat(lng);
+    if(!Number.isFinite(la)||!Number.isFinite(ln)) continue;
+    wps.push({id:uid(),lat:la,lng:ln,mode:m==='d'?'direct':'route'});
+  }
+  return {profile:params.get('p'),waypoints:wps};
+}
+function loadFromUrl(){
+  const st=parseState(location.hash);
+  if(!st||!st.waypoints.length) return;
+  if(st.profile){                                  // only adopt a profile the UI offers
+    const sel=document.getElementById('profile');
+    if([...sel.options].some(o=>o.value===st.profile)){ sel.value=st.profile; profile=st.profile; }
+  }
+  waypoints=st.waypoints;
+  syncMarkers();
+  recompute();
+  try{ map.fitBounds(L.latLngBounds(waypoints.map(w=>[w.lat,w.lng])),{padding:[40,40],maxZoom:18}); }
+  catch(_){/* degenerate bounds (single point / not yet sized) — leave the view as-is */}
+}
 
 // ---- map interaction ----
 map.on('click',e=>addPoint(e.latlng.lng,e.latlng.lat));
@@ -242,7 +288,7 @@ async function updateProfile(legs,my){
   renderProfile(prof,flat);
 }
 function renderProfile(prof,flat){
-  const grp=document.getElementById('profileGrp'), box=document.getElementById('profile');
+  const grp=document.getElementById('profileGrp'), box=document.getElementById('profChart');
   if(!prof||prof.length<2){grp.style.display='none';box.innerHTML='';clearProfileMarker();return;}
   grp.style.display='';
   const W=300,H=88, dMax=prof[prof.length-1].d||1;
@@ -305,6 +351,7 @@ function clearProfileMarker(){ if(profileMarker){map.removeLayer(profileMarker);
 async function recompute(){
   const my=++gen;
   renderLegList();
+  syncUrl();                 // keep the bookmarkable hash in step with every edit
   if(waypoints.length<2){setRoute([]);setStats(0,0);showWarn('');renderProfile(null);return;}
   // Kick every routed leg's BRouter fetch off at once (they were sequential),
   // keeping one polyline per leg so the per-leg toggle/highlight/elevation model
@@ -480,6 +527,15 @@ document.getElementById('btnClear').onclick=()=>{waypoints=[];legCache.clear();s
 document.getElementById('btnGpx').onclick=exportGpx;
 const btnShare=document.getElementById('btnShare');
 btnShare.onclick=shareGpx;
+document.getElementById('btnCopyLink').onclick=async()=>{
+  if(waypoints.length<1){showWarn('Add a point first — there’s no route to link yet.');return;}
+  syncUrl();                         // make sure the address bar is current, then copy it
+  const btn=document.getElementById('btnCopyLink');
+  try{
+    await navigator.clipboard.writeText(location.href);
+    const t=btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent=t,1200);
+  }catch(_){ showWarn('Couldn’t copy automatically — the link is in your address bar.'); }
+};
 // reveal "Send to phone" only where the browser can share files (mostly mobile)
 try{
   const probe=new File(['x'],'probe.gpx',{type:GPX_TYPE});

@@ -229,7 +229,7 @@ test.describe('route editing', () => {
     await page.locator(MAP).click({ position: { x: 430, y: 340 } });
     // whole-route profile (stubbed via beforeEach) renders an SVG under the stats
     await expect(page.locator('#profileGrp')).toBeVisible();
-    await expect(page.locator('#profile svg.prof')).toBeVisible();
+    await expect(page.locator('#profChart svg.prof')).toBeVisible();
   });
 
   test('flags ascents steeper than 18% on the elevation profile', async ({ page }) => {
@@ -251,11 +251,11 @@ test.describe('route editing', () => {
     await expect(page.locator('.leaflet-container')).toBeVisible();
     await page.locator(MAP).click({ position: { x: 250, y: 220 } });
     await page.locator(MAP).click({ position: { x: 430, y: 340 } });
-    await expect(page.locator('#profile svg.prof')).toBeVisible();
+    await expect(page.locator('#profChart svg.prof')).toBeVisible();
     // exactly one steep run marked, and the badge reports its 200 m length
-    await expect(page.locator('#profile .prof-steep')).toHaveCount(1);
-    await expect(page.locator('#profile .prof-steep-lbl')).toContainText('200 m');
-    await expect(page.locator('#profile .prof-steep-lbl')).toContainText('18%');
+    await expect(page.locator('#profChart .prof-steep')).toHaveCount(1);
+    await expect(page.locator('#profChart .prof-steep-lbl')).toContainText('200 m');
+    await expect(page.locator('#profChart .prof-steep-lbl')).toContainText('18%');
   });
 
   test('a gentle route shows no steep-ascent marker', async ({ page }) => {
@@ -266,9 +266,9 @@ test.describe('route editing', () => {
     await expect(page.locator('.leaflet-container')).toBeVisible();
     await page.locator(MAP).click({ position: { x: 250, y: 220 } });
     await page.locator(MAP).click({ position: { x: 430, y: 340 } });
-    await expect(page.locator('#profile svg.prof')).toBeVisible();
-    await expect(page.locator('#profile .prof-steep')).toHaveCount(0);
-    await expect(page.locator('#profile .prof-steep-lbl')).toHaveCount(0);
+    await expect(page.locator('#profChart svg.prof')).toBeVisible();
+    await expect(page.locator('#profChart .prof-steep')).toHaveCount(0);
+    await expect(page.locator('#profChart .prof-steep-lbl')).toHaveCount(0);
   });
 
   test('“Send to phone” shares the GPX via the Web Share API', async ({ page }) => {
@@ -343,5 +343,42 @@ test.describe('route editing', () => {
     await expect(page.locator('.leaflet-marker-icon')).toHaveCount(0);
     await expect(page.locator('#legList li')).toHaveCount(0);
     await expect(page.locator('#statDist')).toHaveText('0.0');
+  });
+
+  test('editing the route encodes waypoints + profile into the URL hash', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    // no route yet → no hash
+    expect(new URL(page.url()).hash).toBe('');
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    // hash now carries the profile and two lat,lng,mode triples
+    await expect.poll(() => new URL(page.url()).hash).toMatch(
+      /^#p=trekking&w=-?\d+\.\d+,-?\d+\.\d+,r;-?\d+\.\d+,-?\d+\.\d+,r$/
+    );
+    // clearing drops the hash again
+    await page.locator('#btnClear').click();
+    await expect.poll(() => new URL(page.url()).hash).toBe('');
+  });
+
+  test('loading a URL hash restores the route', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await stubHeight(page);
+    // two waypoints near Zürich; second leg drawn direct so no BRouter needed to verify
+    await page.goto('/#p=mtb&w=47.37600,8.54100,r;47.39000,8.60000,d');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    // coordinates round-tripped
+    await expect(page.locator('#legList li').first().locator('.legmeta .d'))
+      .toHaveText('47.3760, 8.5410');
+    await expect(page.locator('#legList li').last().locator('.legmeta .d'))
+      .toHaveText('47.3900, 8.6000');
+    // profile restored, and the second leg is the direct one from the hash
+    await expect(page.locator('#profile')).toHaveValue('mtb');
+    await expect(page.locator('#legList .mini.direct')).toHaveCount(1);
   });
 });
