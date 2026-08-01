@@ -398,7 +398,7 @@ test.describe('route editing', () => {
     await expect(page.locator('#miniBar')).toBeHidden();
   });
 
-  test('switching region keeps the waypoints and re-fits the map', async ({ page }) => {
+  test('switching region keeps the waypoints', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);
     await stubHeight(page);
@@ -414,6 +414,42 @@ test.describe('route editing', () => {
     await expect(page.locator('#legList li').first().locator('.legmeta .d'))
       .toHaveText('47.2400, 14.1500');
     await expect(page.locator('.leaflet-marker-icon')).toHaveCount(2);
+  });
+
+  // The two grids expose different zoom ladders, so "same view" is measured on
+  // the ground — where the centre is, and how many metres a pixel covers.
+  const groundView = () => ({
+    lat: map.getCenter().lat,
+    lng: map.getCenter().lng,
+    // longitude span of 100px at the map centre ⇒ scale, independent of CRS
+    span:
+      map.containerPointToLatLng([map.getSize().x / 2 + 100, map.getSize().y / 2]).lng -
+      map.getCenter().lng,
+  });
+
+  test('switching region keeps the shown map area', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.route(/heightProfile/, (r) => r.fulfill({ json: bevProfile }));
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    // pan/zoom somewhere deliberate first, so we're not just matching defaults
+    await page.evaluate(() => map.setView([47.05, 9.6], 15));
+    const before = await page.evaluate(groundView);
+    await page.locator('#regionSeg button[data-region="at"]').click();
+    await expect(page.locator('#regionSeg button[data-region="at"]')).toHaveClass(/\bon\b/);
+    const after = await page.evaluate(groundView);
+    // Same centre, to within Leaflet snapping the map pane to whole pixels —
+    // so the tolerance is a couple of pixels of the *new* view, not a fixed
+    // number of degrees (a pixel is hundreds of metres at this scale).
+    const degPerPx = Math.abs(after.span) / 100;
+    expect(Math.abs(after.lng - before.lng)).toBeLessThan(3 * degPerPx);
+    expect(Math.abs(after.lat - before.lat)).toBeLessThan(3 * degPerPx);
+    // … and the nearest scale the new grid offers: neither grid can match the
+    // other exactly, but it must land within one zoom step (a factor of 2)
+    const ratio = after.span / before.span;
+    expect(ratio).toBeGreaterThan(0.5);
+    expect(ratio).toBeLessThan(2);
   });
 
   test('the minimized card mirrors distance/ascent and its undo works', async ({ page }) => {

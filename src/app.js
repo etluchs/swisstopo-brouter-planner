@@ -48,7 +48,6 @@ const REGIONS={
   ch:{
     id:'ch', label:'Switzerland',
     crs:swissCRS, center:[47.376,8.541], zoom:19, minZoom:8, maxZoom:28,
-    bounds:L.latLngBounds([45.75,5.8],[47.85,10.6]),
     bases:[
       {key:'topo',   label:'Topo',   make:()=>swissRaster('ch.swisstopo.pixelkarte-farbe','jpeg')},
       {key:'aerial', label:'Aerial', make:()=>swissRaster('ch.swisstopo.swissimage','jpeg',{maxNativeZoom:28})},
@@ -74,7 +73,6 @@ const REGIONS={
   at:{
     id:'at', label:'Austria',
     crs:L.CRS.EPSG3857, center:[47.241,14.1525], zoom:14, minZoom:7, maxZoom:19,
-    bounds:L.latLngBounds([46.3,9.4],[49.1,17.3]),
     bases:[
       {key:'topo',    label:'Topo',    make:bevRaster},
       {key:'aerial',  label:'Aerial',  make:()=>basemapAt('bmaporthofoto30cm','normal','jpeg')},
@@ -102,8 +100,34 @@ let region, map, routeGroup;
 const baseLayers=new Map();      // base key -> L.tileLayer for the current region
 const overlayLayers=new Map();   // overlay id -> L.tileLayer (created lazily on first enable)
 
-function buildMap(){
-  map=L.map('map',{crs:region.crs,center:region.center,zoom:region.zoom,
+// Ground metres per pixel at `center`, for any CRS at an integer zoom. Zoom
+// numbers mean nothing across regions — the Swiss grid's resolutions aren't
+// powers of two — so scale is compared in metres/px, which is CRS-agnostic.
+function resolutionAt(crs,center,zoom){
+  const east=L.latLng(center.lat,center.lng+0.01);
+  const px=crs.latLngToPoint(center,zoom).distanceTo(crs.latLngToPoint(east,zoom));
+  return px>0?haversine([center.lng,center.lat],[east.lng,east.lat])/px:Infinity;
+}
+// The zoom level of `crs` whose scale sits closest to `res` — compared as a
+// ratio (log), so being 30% too coarse loses to being 20% too fine regardless
+// of how big the numbers are.
+function zoomMatchingResolution(crs,center,res,minZoom,maxZoom){
+  let best=minZoom,bestErr=Infinity;
+  for(let z=minZoom;z<=maxZoom;z++){
+    const err=Math.abs(Math.log(resolutionAt(crs,center,z)/res));
+    if(err<bestErr){bestErr=err;best=z;}
+  }
+  return best;
+}
+
+// `view` (optional) carries the previous map's centre and scale, so a region
+// switch lands on the same ground instead of jumping to the new region's home.
+function buildMap(view){
+  const center=view?view.center:L.latLng(region.center);
+  const zoom=view
+    ? zoomMatchingResolution(region.crs,center,view.res,region.minZoom,region.maxZoom)
+    : region.zoom;
+  map=L.map('map',{crs:region.crs,center,zoom,
     minZoom:region.minZoom,maxZoom:region.maxZoom});
   baseLayers.clear(); overlayLayers.clear();
   region.bases.forEach((b,i)=>{
@@ -128,26 +152,23 @@ function buildMap(){
 }
 
 // Rebuild the map in another country's projection. Waypoints are WGS84 and stay
-// as they are; anything derived from the old country's DEM is dropped.
+// as they are; anything derived from the old country's DEM is dropped. The view
+// carries over — swapping the projection under the same patch of ground is the
+// point (comparing the two national maps over one valley), so it must not jump.
 function setRegion(id){
   if(!REGIONS[id] || (region && region.id===id)) return;
+  const view=map&&{center:map.getCenter(),
+                   res:resolutionAt(map.options.crs,map.getCenter(),map.getZoom())};
   region=REGIONS[id];
   gen++;                                        // strand any in-flight elevation work
   directCache.clear(); profileCache.clear();    // a different national DEM answers now
   markers.clear(); legLayers.clear();
   profileMarker=null;                           // lived on the map we're about to destroy
   if(map) map.remove();
-  buildMap();
+  buildMap(view);
   renderBaseSwitch(); renderOverlayList(); renderRegionSwitch(); applyRegionChrome();
   try{ localStorage.setItem('region',id); }catch(_){}
   syncMarkers(); recompute();
-  // Keep the user near their route if it's inside the new country; otherwise
-  // show that country. (Switching with a route abroad keeps the route — the
-  // waypoints are still yours — it just isn't under this region's map.)
-  if(waypoints.length&&waypoints.every(w=>region.bounds.contains([w.lat,w.lng]))){
-    try{ map.fitBounds(L.latLngBounds(waypoints.map(w=>[w.lat,w.lng])),{padding:[40,40],maxZoom:18}); }
-    catch(_){ map.setView(region.center,region.zoom); }
-  }else map.setView(region.center,region.zoom);
   requestAnimationFrame(()=>map.invalidateSize());
 }
 
