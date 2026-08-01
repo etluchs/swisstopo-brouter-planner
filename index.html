@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <meta name="referrer" content="no-referrer" />
-<title>Topo Route Planner · swisstopo + BRouter</title>
+<title>Topo Route Planner · swisstopo / BEV + BRouter</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <link rel="stylesheet" href="./src/styles.css" />
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
@@ -17,7 +17,7 @@
     <header>
       <div class="htext">
         <h1>Topo Route Planner</h1>
-        <div class="sub">Swiss topo base · <b>routed</b> legs follow OSM via BRouter · <i>direct</i> legs trace paths by hand for trails OSM is missing.</div>
+        <div class="sub" id="subtitle"></div>
       </div>
       <button id="btnMin" class="min-toggle" title="Minimize panel" aria-label="Minimize panel">«</button>
     </header>
@@ -32,13 +32,21 @@
 
     <div class="scroll">
 
+      <!-- Country picker. Each region brings its own projection, so switching
+           rebuilds the map; the waypoints (plain WGS84) are kept. -->
+      <div class="grp">
+        <label class="h">Region</label>
+        <div class="seg" id="regionSeg"></div>
+        <div class="hint" id="regionNote"></div>
+      </div>
+
       <div class="grp">
         <label class="h">New leg drawn as</label>
         <div class="seg" id="modeSeg">
           <button data-mode="route" class="on"><span class="dash"></span>Routed</button>
           <button data-mode="direct"><span class="dash d"></span>Direct</button>
         </div>
-        <div class="hint">Click the map to add points. Routed uses BRouter; direct draws a straight line — drop several to trace a curve you see on the map. Click an existing leg to insert a point. Right-click (or long-press) to identify what's on the map.</div>
+        <div class="hint">Click the map to add points. Routed uses BRouter; direct draws a straight line — drop several to trace a curve you see on the map. Click an existing leg to insert a point. Right-click (or long-press) to <span id="identifyHint"></span>.</div>
       </div>
 
       <div class="grp">
@@ -46,7 +54,7 @@
           <div class="stat"><div class="v" id="statDist">0.0</div><div class="k">km total</div></div>
           <div class="stat"><div class="v" id="statAsc">0</div><div class="k">m ascent*</div></div>
         </div>
-        <div class="hint">*ascent from routed legs (BRouter) and direct legs (swisstopo swissAlti3D DEM).</div>
+        <div class="hint">*ascent from routed legs (BRouter) and direct legs (<span id="ascentNote"></span>).</div>
       </div>
 
       <div class="grp" id="profileGrp" style="display:none">
@@ -76,7 +84,7 @@
       </div>
 
       <div class="grp">
-        <label class="h">swisstopo overlays</label>
+        <label class="h" id="overlayTitle"></label>
         <div class="layers" id="overlayList"></div>
         <div class="hint">Thematic layers drawn over the base map, below your route.</div>
       </div>
@@ -103,10 +111,7 @@
     </div>
   </div>
   <div id="map">
-    <div class="basesw" id="basesw">
-      <button data-base="topo" class="on">Topo</button>
-      <button data-base="aerial">Aerial</button>
-    </div>
+    <div class="basesw" id="basesw"></div>
     <div class="modeflag" id="modeflag">Adding <b class="r">routed</b> points</div>
   </div>
 </div>

@@ -1,6 +1,11 @@
-/* swisstopo raster base (native LV95 / EPSG:2056) + BRouter router.
-   The map renders in the true Swiss projection so it matches the printed
-   Landeskarte grid with no Mercator distortion (proj4 + proj4leaflet).
+/* Official national topo raster + BRouter router, for more than one country.
+   A *region* bundles everything country-specific: the CRS the map renders in,
+   its base/overlay rasters, its point-identify service and its DEM. Switzerland
+   renders in the true Swiss projection (LV95, via proj4) so it matches the
+   printed Landeskarte grid; Austria's BEV/basemap.at rasters are published on
+   the standard Web-Mercator XYZ grid, so that region uses Leaflet's default CRS.
+   Leaflet can't change CRS on a live map, so switching region tears the map down
+   and rebuilds it — the waypoints (plain WGS84) survive untouched.
    State: ordered waypoints; each carries `mode` for the leg leading INTO it
    ('route'|'direct'). Route is built per-leg, so direct legs never hit the
    router — that's how a path missing from OSM but visible on topo enters the track.
@@ -17,27 +22,138 @@ const swissCRS=new L.Proj.CRS('EPSG:2056',proj4.defs('EPSG:2056'),{
   resolutions:LV95_RES, origin:[2420000,1350000],
   bounds:L.bounds([2420000,1030000],[2900000,1350000])});
 
-const TILE = id => `https://wmts.geo.admin.ch/1.0.0/${id}/default/current/2056/{z}/{x}/{y}.jpeg`;
-const topo   = L.tileLayer(TILE('ch.swisstopo.pixelkarte-farbe'),{maxZoom:28,maxNativeZoom:27,attribution:'© swisstopo'});
-const aerial = L.tileLayer(TILE('ch.swisstopo.swissimage'),      {maxZoom:28,maxNativeZoom:28,attribution:'© swisstopo'});
+// --- raster sources -------------------------------------------------------
+// swisstopo WMTS, LV95 tile grid.
+const swissRaster=(id,ext,opts)=>L.tileLayer(
+  `https://wmts.geo.admin.ch/1.0.0/${id}/default/current/2056/{z}/{x}/{y}.${ext}`,
+  {maxZoom:28,maxNativeZoom:27,attribution:'© swisstopo',...opts});
+// BEV "Austrian Map" (ÖK) raster — plain XYZ, published up to z16.
+const bevRaster=()=>L.tileLayer('https://maps.bev.gv.at/tiles/karte/{z}/{x}/{y}.png',
+  {maxZoom:19,maxNativeZoom:16,attribution:'© BEV'});
+// basemap.at (Verwaltungsgrundkarte). Same Web-Mercator grid but the WMTS
+// template is {TileMatrix}/{TileRow}/{TileCol} — i.e. z/y/x, not z/x/y. Three
+// interchangeable hosts, so spread the load with Leaflet's {s} placeholder.
+const basemapAt=(layer,style,ext,opts)=>L.tileLayer(
+  `https://maps{s}.wien.gv.at/basemap/${layer}/${style}/google3857/{z}/{y}/{x}.${ext}`,
+  {subdomains:['','1','2'],maxZoom:19,maxNativeZoom:19,
+   attribution:'© <a href="https://basemap.at">basemap.at</a> (CC BY 4.0)',...opts});
 
-const map = L.map('map',{crs:swissCRS,center:[47.376,8.541],zoom:19,minZoom:8,maxZoom:28,layers:[topo]});
+// --- regions --------------------------------------------------------------
+// One entry per country. Adding another national topo service is one object:
+// give it a CRS, its rasters, and DEM/identify adapters with these signatures.
+//   ascent(a,b)    -> Promise<metres climbed on the straight line a→b>
+//   profile(flat)  -> Promise<[{d,e}]>  (d = metres along route, e = altitude)
+//   identify(ll)   -> Promise<HTML string for the popup>
+const REGIONS={
+  ch:{
+    id:'ch', label:'Switzerland',
+    crs:swissCRS, center:[47.376,8.541], zoom:19, minZoom:8, maxZoom:28,
+    bounds:L.latLngBounds([45.75,5.8],[47.85,10.6]),
+    bases:[
+      {key:'topo',   label:'Topo',   make:()=>swissRaster('ch.swisstopo.pixelkarte-farbe','jpeg')},
+      {key:'aerial', label:'Aerial', make:()=>swissRaster('ch.swisstopo.swissimage','jpeg',{maxNativeZoom:28})},
+    ],
+    // Thematic overlays (transparent PNG on the same grid). Higher zIndex than
+    // the base but still in tilePane, so they sit above the map yet below the
+    // route (overlayPane) and markers (markerPane). Add a layer = one line here.
+    overlays:[
+      {id:'ch.astra.veloland',         label:'Cycling routes (Veloland)'},
+      {id:'ch.astra.mountainbikeland', label:'Mountain-bike routes'},
+      {id:'ch.bav.haltestellen-oev',   label:'Public transport stops'},
+    ],
+    makeOverlay:id=>swissRaster(id,'png',{zIndex:10}),
+    overlayTitle:'swisstopo overlays',
+    subtitle:'Swiss topo base (swisstopo)',
+    note:'Landeskarte + swissAlti3D elevation from swisstopo, in the native Swiss grid (LV95). '
+        +'BRouter needs the E5_N45 segment file for Switzerland.',
+    identifyHint:'identify what’s on the map', demLabel:'swisstopo swissAlti3D DEM',
+    tileWarn:'swisstopo tiles didn’t load in this preview — almost certainly referrer/hotlink protection on the sandbox origin, not a bug in the endpoint. In a normal browser or your own deployment the swisstopo Landeskarte loads fine.',
+    identifyError:'Couldn’t reach the swisstopo identify service.',
+    ascent:swissAscent, profile:swissProfile, identify:swissIdentify,
+  },
+  at:{
+    id:'at', label:'Austria',
+    crs:L.CRS.EPSG3857, center:[47.241,14.1525], zoom:14, minZoom:7, maxZoom:19,
+    bounds:L.latLngBounds([46.3,9.4],[49.1,17.3]),
+    bases:[
+      {key:'topo',    label:'Topo',    make:bevRaster},
+      {key:'aerial',  label:'Aerial',  make:()=>basemapAt('bmaporthofoto30cm','normal','jpeg')},
+      {key:'terrain', label:'Terrain', make:()=>basemapAt('bmapgelaende','grau','jpeg')},
+    ],
+    overlays:[
+      {id:'bmapoverlay', label:'Labels & boundaries'},
+    ],
+    makeOverlay:id=>basemapAt(id,'normal','png',{zIndex:10}),
+    overlayTitle:'basemap.at overlays',
+    subtitle:'Austrian topo base (BEV)',
+    note:'Austrian Map (ÖK) raster + DEM elevation from BEV, orthophoto and relief from basemap.at. '
+        +'The ÖK raster is published to zoom 16 and is upscaled beyond that. '
+        +'BRouter needs the E5_N45, E10_N45 and E15_N45 segment files for Austria.',
+    identifyHint:'read the BEV terrain height', demLabel:'BEV DEM',
+    tileWarn:'BEV / basemap.at tiles didn’t load in this preview — almost certainly a sandboxed origin blocking third-party images, not a bug in the endpoint. In a normal browser or your own deployment the Austrian Map loads fine.',
+    identifyError:'Couldn’t reach the BEV height service.',
+    ascent:austrianAscent, profile:austrianProfile, identify:austrianIdentify,
+  },
+};
+const DEFAULT_REGION='ch';
 
-// Optional swisstopo thematic overlays (transparent PNG, same LV95 grid). Higher
-// zIndex than the base but still in tilePane, so they sit above the map yet below
-// the route (overlayPane) and markers (markerPane). Add a layer = one line here.
-const OVERLAYS=[
-  {id:'ch.astra.veloland',         label:'Cycling routes (Veloland)'},
-  {id:'ch.astra.mountainbikeland', label:'Mountain-bike routes'},
-  {id:'ch.bav.haltestellen-oev',   label:'Public transport stops'},
-];
-const overlayLayers=new Map();   // id -> L.tileLayer (created lazily on first enable)
+// --- map lifecycle --------------------------------------------------------
+let region, map, routeGroup;
+const baseLayers=new Map();      // base key -> L.tileLayer for the current region
+const overlayLayers=new Map();   // overlay id -> L.tileLayer (created lazily on first enable)
+
+function buildMap(){
+  map=L.map('map',{crs:region.crs,center:region.center,zoom:region.zoom,
+    minZoom:region.minZoom,maxZoom:region.maxZoom});
+  baseLayers.clear(); overlayLayers.clear();
+  region.bases.forEach((b,i)=>{
+    const layer=b.make();
+    baseLayers.set(b.key,layer);
+    if(i===0) layer.addTo(map);
+  });
+  // Safety net: if the national tiles are blocked in this context (referrer /
+  // hotlink protection on a sandboxed origin), warn once. There's no raster
+  // fallback — a Web-Mercator substitute couldn't align with the Swiss grid —
+  // but a real deployment loads the official rasters fine.
+  let blocked=false, errs=0;
+  baseLayers.get(region.bases[0].key).on('tileerror',()=>{
+    if(blocked || ++errs<3) return;
+    blocked=true; showWarn(region.tileWarn);
+  });
+  routeGroup=L.layerGroup().addTo(map);
+  map.on('click',e=>addPoint(e.latlng.lng,e.latlng.lat));
+  // Left-click adds waypoints, so identify rides on contextmenu (fired by both
+  // right-click and touch long-press).
+  map.on('contextmenu',e=>{L.DomEvent.preventDefault(e.originalEvent);identifyAt(e.latlng);});
+}
+
+// Rebuild the map in another country's projection. Waypoints are WGS84 and stay
+// as they are; anything derived from the old country's DEM is dropped.
+function setRegion(id){
+  if(!REGIONS[id] || (region && region.id===id)) return;
+  region=REGIONS[id];
+  gen++;                                        // strand any in-flight elevation work
+  directCache.clear(); profileCache.clear();    // a different national DEM answers now
+  markers.clear(); legLayers.clear();
+  profileMarker=null;                           // lived on the map we're about to destroy
+  if(map) map.remove();
+  buildMap();
+  renderBaseSwitch(); renderOverlayList(); renderRegionSwitch(); applyRegionChrome();
+  try{ localStorage.setItem('region',id); }catch(_){}
+  syncMarkers(); recompute();
+  // Keep the user near their route if it's inside the new country; otherwise
+  // show that country. (Switching with a route abroad keeps the route — the
+  // waypoints are still yours — it just isn't under this region's map.)
+  if(waypoints.length&&waypoints.every(w=>region.bounds.contains([w.lat,w.lng]))){
+    try{ map.fitBounds(L.latLngBounds(waypoints.map(w=>[w.lat,w.lng])),{padding:[40,40],maxZoom:18}); }
+    catch(_){ map.setView(region.center,region.zoom); }
+  }else map.setView(region.center,region.zoom);
+  requestAnimationFrame(()=>map.invalidateSize());
+}
+
 function toggleOverlay(id,on){
   if(on){
-    if(!overlayLayers.has(id))
-      overlayLayers.set(id,L.tileLayer(
-        `https://wmts.geo.admin.ch/1.0.0/${id}/default/current/2056/{z}/{x}/{y}.png`,
-        {maxZoom:28,maxNativeZoom:27,zIndex:10,attribution:'© swisstopo'}));
+    if(!overlayLayers.has(id)) overlayLayers.set(id,region.makeOverlay(id));
     overlayLayers.get(id).addTo(map);
   }else if(overlayLayers.has(id)){
     map.removeLayer(overlayLayers.get(id));
@@ -45,7 +161,8 @@ function toggleOverlay(id,on){
 }
 function renderOverlayList(){
   const box=document.getElementById('overlayList');
-  OVERLAYS.forEach(o=>{
+  box.innerHTML='';
+  region.overlays.forEach(o=>{
     const lab=document.createElement('label');
     const cb=document.createElement('input');cb.type='checkbox';
     cb.addEventListener('change',()=>toggleOverlay(o.id,cb.checked));
@@ -53,36 +170,73 @@ function renderOverlayList(){
     lab.append(cb,span); box.append(lab);
   });
 }
+function renderBaseSwitch(){
+  const box=document.getElementById('basesw');
+  box.innerHTML='';
+  region.bases.forEach((b,i)=>{
+    const btn=document.createElement('button');
+    btn.dataset.base=b.key; btn.textContent=b.label;
+    if(i===0) btn.classList.add('on');
+    box.append(btn);
+  });
+}
+function renderRegionSwitch(){
+  const box=document.getElementById('regionSeg');
+  box.innerHTML='';
+  for(const r of Object.values(REGIONS)){
+    const btn=document.createElement('button');
+    btn.dataset.region=r.id; btn.textContent=r.label;
+    if(r.id===region.id) btn.classList.add('on');
+    box.append(btn);
+  }
+}
+function applyRegionChrome(){
+  document.getElementById('subtitle').innerHTML=
+    `${region.subtitle} · <b>routed</b> legs follow OSM via BRouter · <i>direct</i> legs `
+    +`trace paths by hand for trails OSM is missing.`;
+  document.getElementById('regionNote').textContent=region.note;
+  document.getElementById('overlayTitle').textContent=region.overlayTitle;
+  document.getElementById('identifyHint').textContent=region.identifyHint;
+  document.getElementById('ascentNote').textContent=region.demLabel;
+}
 
 // ---- feature identify (right-click / long-press) ----
-// Left-click adds waypoints, so identify rides on contextmenu (fired by both
-// right-click and touch long-press). Queries the enabled overlays plus place
-// names, so it always returns something useful. swisstopo identify is LV95-native.
-const IDENTIFY_API='https://api3.geo.admin.ch/rest/services/all/MapServer/identify';
-const IDENTIFY_EXTRA=['ch.swisstopo.swissnames3d'];   // place-name context, always on
-map.on('contextmenu',e=>{L.DomEvent.preventDefault(e.originalEvent);identifyAt(e.latlng);});
+// What a point can tell you differs per country: Switzerland has a real
+// multi-layer identify service, Austria publishes a DEM point query. Both
+// resolve to popup HTML, so the interaction is identical either way.
 async function identifyAt(latlng){
-  const active=OVERLAYS.filter(o=>overlayLayers.has(o.id)&&map.hasLayer(overlayLayers.get(o.id))).map(o=>o.id);
-  const layers=[...active,...IDENTIFY_EXTRA];
   const pop=L.popup({className:'id-pop',maxWidth:260,autoPan:false})
     .setLatLng(latlng).setContent('Identifying…').openOn(map);
+  const target=region;
   try{
-    const [E,N]=wgs84ToLv95(latlng.lng,latlng.lat);
-    const b=map.getBounds();
-    const sw=wgs84ToLv95(b.getWest(),b.getSouth()), ne=wgs84ToLv95(b.getEast(),b.getNorth());
-    const sz=map.getSize();
-    const url=`${IDENTIFY_API}?geometry=${E.toFixed(1)},${N.toFixed(1)}&geometryType=esriGeometryPoint`
-      +`&layers=all:${layers.join(',')}`
-      +`&mapExtent=${sw[0].toFixed(1)},${sw[1].toFixed(1)},${ne[0].toFixed(1)},${ne[1].toFixed(1)}`
-      +`&imageDisplay=${sz.x},${sz.y},96&tolerance=8&sr=2056&lang=en`;
-    const res=await fetch(url);
-    if(!res.ok) throw new Error('identify '+res.status);
-    const data=await res.json();
-    pop.setContent(identifyHtml(data.results||[]));
-  }catch(_){ pop.setContent('Couldn’t reach the swisstopo identify service.'); }
+    const html=await target.identify(latlng);
+    if(region===target) pop.setContent(html);
+  }catch(_){ pop.setContent(target.identifyError); }
 }
 const featLabel=a=>(a&&(a.name||a.label||a.bezeichnung||a.gemname))||'';
 const escapeHtml=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const idRow=(layer,value)=>`<div class="id-row"><span class="id-layer">${escapeHtml(layer)}</span>${value}</div>`;
+
+// Switzerland: queries the enabled overlays plus place names, so it always
+// returns something useful. swisstopo identify is LV95-native.
+const IDENTIFY_API='https://api3.geo.admin.ch/rest/services/all/MapServer/identify';
+const IDENTIFY_EXTRA=['ch.swisstopo.swissnames3d'];   // place-name context, always on
+async function swissIdentify(latlng){
+  const active=region.overlays.filter(o=>overlayLayers.has(o.id)&&map.hasLayer(overlayLayers.get(o.id))).map(o=>o.id);
+  const layers=[...active,...IDENTIFY_EXTRA];
+  const [E,N]=wgs84ToLv95(latlng.lng,latlng.lat);
+  const b=map.getBounds();
+  const sw=wgs84ToLv95(b.getWest(),b.getSouth()), ne=wgs84ToLv95(b.getEast(),b.getNorth());
+  const sz=map.getSize();
+  const url=`${IDENTIFY_API}?geometry=${E.toFixed(1)},${N.toFixed(1)}&geometryType=esriGeometryPoint`
+    +`&layers=all:${layers.join(',')}`
+    +`&mapExtent=${sw[0].toFixed(1)},${sw[1].toFixed(1)},${ne[0].toFixed(1)},${ne[1].toFixed(1)}`
+    +`&imageDisplay=${sz.x},${sz.y},96&tolerance=8&sr=2056&lang=en`;
+  const res=await fetch(url);
+  if(!res.ok) throw new Error('identify '+res.status);
+  const data=await res.json();
+  return identifyHtml(data.results||[]);
+}
 // SchweizMobil route pages, buildable from the identify attribute chmobil_route_number.
 const SCHWEIZMOBIL={'ch.astra.veloland':'cycling-in-switzerland',
                     'ch.astra.mountainbikeland':'mountainbiking-in-switzerland'};
@@ -102,27 +256,27 @@ function identifyHtml(results){
     const nameHtml=url
       ? `<a class="id-link" href="${url}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)} ↗</a>`
       : escapeHtml(name);
-    rows.push(`<div class="id-row"><span class="id-layer">${escapeHtml(r.layerName||r.layerBodId||'')}</span>`
-      +`${nameHtml}</div>`);
+    rows.push(idRow(r.layerName||r.layerBodId||'',nameHtml));
     if(rows.length>=6) break;
   }
   return `<div class="id-list">${rows.join('')}</div>`;
 }
-const routeGroup = L.layerGroup().addTo(map);
-// Size the map, then restore any route encoded in the URL hash (fitBounds needs
-// a known map size to pick the right zoom, so both wait for the same tick).
-setTimeout(()=>{map.invalidateSize();loadFromUrl();},200);
 
-// Safety net: if swisstopo tiles are blocked in this context (referrer/hotlink
-// protection on a sandboxed origin), warn once. There's no raster fallback now
-// that the map renders in native LV95 — OpenTopoMap is Web-Mercator-only, and
-// mixed projections can't align — but a real deployment loads swisstopo fine.
-let swissBlocked=false, topoErrs=0;
-topo.on('tileerror',()=>{
-  if(swissBlocked || ++topoErrs<3) return;
-  swissBlocked=true;
-  showWarn('swisstopo tiles didn\u2019t load in this preview \u2014 almost certainly referrer/hotlink protection on the sandbox origin, not a bug in the endpoint. In a normal browser or your own deployment the swisstopo Landeskarte loads fine.');
-});
+// Austria: BEV publishes no multi-layer identify, but it does expose a DEM
+// point query — so a long-press answers "how high am I here?" instead.
+async function austrianIdentify(latlng){
+  const url=`${BEV_HEIGHT}singleHeight?`
+    +new URLSearchParams({point:`${latlng.lng.toFixed(6)},${latlng.lat.toFixed(6)}`});
+  const res=await fetch(url,{headers:{Accept:'application/json'}});
+  if(!res.ok) throw new Error('singleHeight '+res.status);
+  const d=await res.json();
+  // The service answers 0 rather than erroring outside its coverage.
+  const h=Number(d&&d.height);
+  return `<div class="id-list">`
+    +idRow('Elevation (BEV DEM)',Number.isFinite(h)&&h!==0?escapeHtml(h.toFixed(1))+' m':'no data here')
+    +idRow('Coordinates',escapeHtml(`${latlng.lat.toFixed(5)}, ${latlng.lng.toFixed(5)}`))
+    +`</div>`;
+}
 
 // ---- state ----
 let waypoints=[];            // {id,lng,lat,mode}
@@ -141,16 +295,18 @@ const pinColor=i=>i===0?getCss('--start'):i===waypoints.length-1?getCss('--end')
 const wpIcon=c=>L.divIcon({className:'',html:`<div class="wp" style="background:${c}"></div>`,iconSize:[16,16],iconAnchor:[8,8]});
 
 // ---- URL bookmarking ----
-// The whole route reduces to waypoints (lat,lng,mode) + routing profile; every
-// other bit of state recomputes from those. We keep that in the URL *hash* (not
-// query params) so it never hits a server — no length ceiling for bookmarks, and
-// coordinates stay out of request logs. 5 decimals ≈ 1 m, finer than the map needs.
-// The hash is rewritten (replaceState, no history spam) on every recompute, so the
-// address bar / any bookmark always reflects the current route.
+// The whole route reduces to region + waypoints (lat,lng,mode) + routing profile;
+// every other bit of state recomputes from those. We keep that in the URL *hash*
+// (not query params) so it never hits a server — no length ceiling for bookmarks,
+// and coordinates stay out of request logs. 5 decimals ≈ 1 m, finer than the map
+// needs. The hash is rewritten (replaceState, no history spam) on every recompute,
+// so the address bar / any bookmark always reflects the current route. The default
+// region is left implicit, which keeps links made before regions existed valid.
 function serializeState(){
   if(!waypoints.length) return '';
   const w=waypoints.map(p=>`${p.lat.toFixed(5)},${p.lng.toFixed(5)},${p.mode==='direct'?'d':'r'}`).join(';');
-  return `#p=${encodeURIComponent(profile)}&w=${w}`;
+  const r=region.id===DEFAULT_REGION?'':`r=${region.id}&`;
+  return `#${r}p=${encodeURIComponent(profile)}&w=${w}`;
 }
 function syncUrl(){
   const h=serializeState();
@@ -160,18 +316,30 @@ function parseState(hash){
   const h=(hash||'').replace(/^#/,'');
   if(!h) return null;
   const params=new URLSearchParams(h);
-  const w=params.get('w'); if(!w) return null;
   const wps=[];
-  for(const tok of w.split(';')){
+  // `w` is optional: `#r=at` alone is a valid "open the Austrian map" link.
+  for(const tok of (params.get('w')||'').split(';')){
     const [lat,lng,m]=tok.split(',');
     const la=parseFloat(lat),ln=parseFloat(lng);
     if(!Number.isFinite(la)||!Number.isFinite(ln)) continue;
     wps.push({id:uid(),lat:la,lng:ln,mode:m==='d'?'direct':'route'});
   }
-  return {profile:params.get('p'),waypoints:wps};
+  return {region:params.get('r'),profile:params.get('p'),waypoints:wps};
+}
+// Booting recomputes an empty route, and that rewrites the hash — so the link
+// we were opened with has to be captured before anything touches it.
+const INITIAL_HASH=location.hash;
+// The region decides the map's CRS, so it has to be known *before* the map is
+// built — read it straight from the hash, else the last one used.
+function initialRegionId(){
+  const st=parseState(INITIAL_HASH);
+  if(st&&st.region&&REGIONS[st.region]) return st.region;
+  if(st&&st.waypoints.length) return DEFAULT_REGION;   // pre-region link
+  try{ const s=localStorage.getItem('region'); if(s&&REGIONS[s]) return s; }catch(_){}
+  return DEFAULT_REGION;
 }
 function loadFromUrl(){
-  const st=parseState(location.hash);
+  const st=parseState(INITIAL_HASH);
   if(!st||!st.waypoints.length) return;
   if(st.profile){                                  // only adopt a profile the UI offers
     const sel=document.getElementById('profile');
@@ -183,9 +351,6 @@ function loadFromUrl(){
   try{ map.fitBounds(L.latLngBounds(waypoints.map(w=>[w.lat,w.lng])),{padding:[40,40],maxZoom:18}); }
   catch(_){/* degenerate bounds (single point / not yet sized) — leave the view as-is */}
 }
-
-// ---- map interaction ----
-map.on('click',e=>addPoint(e.latlng.lng,e.latlng.lat));
 
 // ---- waypoint ops ----
 function addPoint(lng,lat){waypoints.push({id:uid(),lng,lat,mode:addMode});syncMarkers();recompute();}
@@ -223,57 +388,101 @@ async function fetchLeg(a,b){
   legCache.set(key,out); return out;
 }
 
-// ---- elevation for direct legs ----
-// Routed legs get ascent from BRouter; hand-drawn direct legs sample the
-// swisstopo swissAlti3D DEM via the profile service. WGS84->LV95 uses swisstopo's
-// approximate formula (sub-metre over CH, so no proj4 dependency).
-const heightApi='https://api3.geo.admin.ch/rest/services/profile.json';
-const directCache=new Map();   // directKey -> ascend metres
-function wgs84ToLv95(lng,lat){
-  const p=(lat*3600-169028.66)/10000, l=(lng*3600-26782.5)/10000;
-  const E=2600072.37+211455.93*l-10938.51*l*p-0.36*l*p*p-44.54*l*l*l;
-  const N=1200147.07+308807.95*p+3745.25*l*l+76.63*p*p-194.56*l*l*p+119.79*p*p*p;
-  return [E,N];
-}
+// ---- elevation ----
+// Routed legs get ascent from BRouter; hand-drawn direct legs and the whole-route
+// profile are sampled from the region's national DEM. Both caches are keyed by
+// region, because the same line has a different answer in each country's model.
+const directCache=new Map();    // region|directKey -> ascend metres
+const profileCache=new Map();   // region|route signature -> [{d,e}]
 const directKey=(a,b)=>`${a.lng.toFixed(6)},${a.lat.toFixed(6)}|${b.lng.toFixed(6)},${b.lat.toFixed(6)}`;
 async function fetchDirectAscend(a,b){
-  const key=directKey(a,b);
+  const key=`${region.id}|${directKey(a,b)}`;
   if(directCache.has(key)) return directCache.get(key);
-  const dist=haversine([a.lng,a.lat],[b.lng,b.lat]);
-  const n=Math.max(2,Math.min(200,Math.round(dist/50)));   // ~1 sample / 50 m
-  const geom=JSON.stringify({type:'LineString',
-    coordinates:[wgs84ToLv95(a.lng,a.lat),wgs84ToLv95(b.lng,b.lat)]});
-  const res=await fetch(`${heightApi}?geom=${encodeURIComponent(geom)}&sr=2056&nbPoints=${n}`);
-  if(!res.ok) throw new Error('height '+res.status);   // don't cache failures — let a later pass retry
-  const pts=await res.json();
-  let asc=0;
-  for(let k=1;k<pts.length;k++){const d=pts[k].alts.COMB-pts[k-1].alts.COMB;if(d>0)asc+=d;}
+  const asc=await region.ascent(a,b);   // failures throw, so they're never cached
   directCache.set(key,asc); return asc;
 }
-
-// ---- whole-route elevation profile ----
-// One swissAlti3D profile for the entire route (routed + direct legs), POSTed so
-// the full geometry fits. Best-effort and cached; the ascent stat is unchanged.
-const PROFILE_API='https://api3.geo.admin.ch/rest/services/profile.json';
-const STEEP_GRADE=0.18;         // rise/run above which an *ascent* is flagged on the profile
-const profileCache=new Map();   // route signature -> [{d,e}]
-let profileMarker=null;
-const routeSig=()=>waypoints.map(w=>`${w.lng.toFixed(5)},${w.lat.toFixed(5)},${w.mode}`).join('|');
 function downsample(arr,max){
   if(arr.length<=max) return arr.slice();
   const step=(arr.length-1)/(max-1), out=[];
   for(let i=0;i<max;i++) out.push(arr[Math.round(i*step)]);
   return out;
 }
-async function fetchProfile(flat){   // flat: [[lat,lng]...]
+
+// Switzerland — swissAlti3D via the swisstopo profile service. WGS84->LV95 uses
+// swisstopo's approximate formula (sub-metre over CH, so no proj4 dependency).
+const SWISS_PROFILE_API='https://api3.geo.admin.ch/rest/services/profile.json';
+function wgs84ToLv95(lng,lat){
+  const p=(lat*3600-169028.66)/10000, l=(lng*3600-26782.5)/10000;
+  const E=2600072.37+211455.93*l-10938.51*l*p-0.36*l*p*p-44.54*l*l*l;
+  const N=1200147.07+308807.95*p+3745.25*l*l+76.63*p*p-194.56*l*l*p+119.79*p*p*p;
+  return [E,N];
+}
+async function swissAscent(a,b){
+  const dist=haversine([a.lng,a.lat],[b.lng,b.lat]);
+  const n=Math.max(2,Math.min(200,Math.round(dist/50)));   // ~1 sample / 50 m
+  const geom=JSON.stringify({type:'LineString',
+    coordinates:[wgs84ToLv95(a.lng,a.lat),wgs84ToLv95(b.lng,b.lat)]});
+  const res=await fetch(`${SWISS_PROFILE_API}?geom=${encodeURIComponent(geom)}&sr=2056&nbPoints=${n}`);
+  if(!res.ok) throw new Error('height '+res.status);
+  const pts=await res.json();
+  let asc=0;
+  for(let k=1;k<pts.length;k++){const d=pts[k].alts.COMB-pts[k-1].alts.COMB;if(d>0)asc+=d;}
+  return asc;
+}
+// POSTed so the full route geometry fits in the request.
+async function swissProfile(flat){   // flat: [[lat,lng]...]
   const coords=downsample(flat,350).map(([lat,lng])=>wgs84ToLv95(lng,lat));
   const body=new URLSearchParams({
     geom:JSON.stringify({type:'LineString',coordinates:coords}), sr:'2056', nbPoints:'150'});
-  const res=await fetch(PROFILE_API,{method:'POST',
+  const res=await fetch(SWISS_PROFILE_API,{method:'POST',
     headers:{'Content-Type':'application/x-www-form-urlencoded'},body});
   if(!res.ok) throw new Error('profile '+res.status);
   return (await res.json()).map(p=>({d:p.dist,e:p.alts.COMB}));
 }
+
+// Austria — BEV's transformator height API. It takes WGS84 lon/lat directly,
+// resamples the polyline into `steps` even intervals, and hands back both the
+// altitudes and the points it used (but no per-point distance).
+const BEV_HEIGHT='https://transformator.bev.gv.at/at.gv.bev.transformator/api/height/';
+async function bevHeightProfile(lonlats,steps){
+  const res=await fetch(`${BEV_HEIGHT}heightProfile`,{method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({point_list:lonlats,steps,concrete:true})});
+  if(!res.ok) throw new Error('BEV height '+res.status);
+  const d=await res.json();
+  if(!d||!Array.isArray(d.heights)||d.heights.length<2) throw new Error('BEV height: empty');
+  // Outside the Austrian DEM every sample comes back as 0 instead of an error —
+  // treat that as "no data" so a route abroad can't report a confident flat 0 m.
+  if(d.heights.every(h=>h===0)) throw new Error('BEV height: outside coverage');
+  return d;
+}
+async function austrianAscent(a,b){
+  const dist=haversine([a.lng,a.lat],[b.lng,b.lat]);
+  const steps=Math.max(2,Math.min(200,Math.round(dist/50)));   // ~1 sample / 50 m
+  const d=await bevHeightProfile([[a.lng,a.lat],[b.lng,b.lat]],steps);
+  return Math.max(0,Number((d.stats||{}).sumUps)||0);
+}
+async function austrianProfile(flat){   // flat: [[lat,lng]...]
+  const pts=downsample(flat,120).map(([lat,lng])=>[lng,lat]);
+  const d=await bevHeightProfile(pts,150);
+  // No per-point distance in the response, so the chart's x axis is cumulative
+  // haversine over the points it echoed back; if it echoed none, fall back to
+  // spreading the reported total length evenly (the samples are equidistant).
+  const echoed=Array.isArray(d.point_list)&&d.point_list.length===d.heights.length?d.point_list:null;
+  const total=Number((d.stats||{}).dist)||0;
+  let acc=0;
+  return d.heights.map((e,i)=>{
+    if(echoed&&i>0) acc+=haversine(echoed[i-1],echoed[i]);
+    return {d:echoed?acc:(total*i)/(d.heights.length-1), e};
+  });
+}
+
+// ---- whole-route elevation profile ----
+// One national-DEM profile for the entire route (routed + direct legs).
+// Best-effort and cached; the ascent stat is unchanged.
+const STEEP_GRADE=0.18;         // rise/run above which an *ascent* is flagged on the profile
+let profileMarker=null;
+const routeSig=()=>waypoints.map(w=>`${w.lng.toFixed(5)},${w.lat.toFixed(5)},${w.mode}`).join('|');
 async function updateProfile(legs,my){
   const flat=[];                         // one deduped line through all legs
   for(const o of legs) for(const ll of o.latlngs){
@@ -281,9 +490,9 @@ async function updateProfile(legs,my){
     if(!last||last[0]!==ll[0]||last[1]!==ll[1]) flat.push(ll);
   }
   if(flat.length<2){renderProfile(null);return;}
-  const sig=routeSig();
+  const sig=`${region.id}|${routeSig()}`;
   let prof=profileCache.get(sig);
-  if(!prof){ try{ prof=await fetchProfile(flat); }catch(_){ return; } if(my!==gen)return; profileCache.set(sig,prof); }
+  if(!prof){ try{ prof=await region.profile(flat); }catch(_){ return; } if(my!==gen)return; profileCache.set(sig,prof); }
   if(my!==gen)return;
   renderProfile(prof,flat);
 }
@@ -510,6 +719,10 @@ async function shareGpx(){
 }
 
 // ---- wiring ----
+document.getElementById('regionSeg').addEventListener('click',e=>{
+  const b=e.target.closest('button');if(!b)return;
+  setRegion(b.dataset.region);
+});
 document.getElementById('modeSeg').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
   addMode=b.dataset.mode;
@@ -519,8 +732,8 @@ document.getElementById('modeSeg').addEventListener('click',e=>{
 });
 document.getElementById('basesw').addEventListener('click',e=>{
   const b=e.target.closest('button');if(!b)return;
-  map.removeLayer(topo);map.removeLayer(aerial);
-  (b.dataset.base==='topo'?topo:aerial).addTo(map);
+  for(const l of baseLayers.values()) map.removeLayer(l);
+  baseLayers.get(b.dataset.base).addTo(map);
   [...e.currentTarget.children].forEach(c=>c.classList.toggle('on',c===b));
 });
 document.getElementById('profile').addEventListener('change',e=>{profile=e.target.value;legCache.clear();recompute();});
@@ -562,4 +775,10 @@ try{
   const probe=new File(['x'],'probe.gpx',{type:GPX_TYPE});
   if(navigator.canShare && navigator.canShare({files:[probe]})) btnShare.hidden=false;
 }catch(_){/* unsupported → stays hidden, Export GPX still works */}
-renderOverlayList();
+
+// ---- boot ----
+// The region fixes the CRS, so resolve it before the map exists.
+setRegion(initialRegionId());
+// Size the map, then restore any route encoded in the URL hash (fitBounds needs
+// a known map size to pick the right zoom, so both wait for the same tick).
+setTimeout(()=>{map.invalidateSize();loadFromUrl();},200);
