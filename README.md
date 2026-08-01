@@ -33,7 +33,11 @@ WGS84 and survive a switch untouched.
 Austria's map renders in plain Web Mercator because that's the grid BEV and
 basemap.at publish on; Switzerland keeps the true Swiss projection so it matches
 the printed Landeskarte. Leaflet can't change CRS on a live map, so switching
-region tears the map down and rebuilds it.
+region tears the map down and rebuilds it — but the view carries over, so you
+can flip between the two national maps over the same valley without the map
+jumping. Zoom *numbers* aren't comparable (LV95's resolutions aren't powers of
+two), so the new zoom is chosen by matching metres-per-pixel; the centre is kept
+to within Leaflet's whole-pixel snapping.
 
 Austria has no public multi-layer identify service, so a right-click there
 answers "how high is this point?" from the BEV DEM instead of listing features.
