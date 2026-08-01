@@ -10,6 +10,9 @@ const profile = JSON.parse(
 const identify = JSON.parse(
   readFileSync(new URL('./fixtures/swisstopo-identify.json', import.meta.url), 'utf-8')
 );
+const bevProfile = JSON.parse(
+  readFileSync(new URL('./fixtures/bev-height-profile.json', import.meta.url), 'utf-8')
+);
 
 // 1x1 transparent PNG used to satisfy tile <img> loads deterministically.
 const PNG = Buffer.from(
@@ -17,14 +20,14 @@ const PNG = Buffer.from(
   'base64'
 );
 
+// Every national raster host the app can reach, so a test never depends on a
+// live tile server — whichever region it exercises.
+const TILE_HOSTS = /wmts\.geo\.admin\.ch|tile\.opentopomap\.org|maps\.bev\.gv\.at|maps\d?\.wien\.gv\.at/;
 async function stubTiles(page, status = 200) {
-  await page.route(/wmts\.geo\.admin\.ch/, (r) =>
+  await page.route(TILE_HOSTS, (r) =>
     status === 200
       ? r.fulfill({ body: PNG, contentType: 'image/png' })
       : r.fulfill({ status, contentType: 'text/plain', body: '' })
-  );
-  await page.route(/tile\.opentopomap\.org/, (r) =>
-    r.fulfill({ body: PNG, contentType: 'image/png' })
   );
 }
 async function stubBrouter(page, onCall) {
@@ -55,13 +58,10 @@ test.describe('bootstrap', () => {
   test('requests swisstopo tiles with the documented URL shape', async ({ page }) => {
     await stubBrouter(page);
     const urls = [];
-    await page.route(/wmts\.geo\.admin\.ch/, (r) => {
+    await page.route(TILE_HOSTS, (r) => {
       urls.push(r.request().url());
       return r.fulfill({ body: PNG, contentType: 'image/png' });
     });
-    await page.route(/tile\.opentopomap\.org/, (r) =>
-      r.fulfill({ body: PNG, contentType: 'image/png' })
-    );
     await page.goto('/');
     await expect.poll(() => urls.length).toBeGreaterThan(0);
     expect(urls[0]).toMatch(
@@ -176,14 +176,11 @@ test.describe('route editing', () => {
 
   test('toggling a swisstopo overlay requests its tiles', async ({ page }) => {
     const overlayUrls = [];
-    await page.route(/wmts\.geo\.admin\.ch/, (r) => {
+    await page.route(TILE_HOSTS, (r) => {
       const u = r.request().url();
       if (u.includes('ch.astra.veloland')) overlayUrls.push(u);
       return r.fulfill({ body: PNG, contentType: 'image/png' });
     });
-    await page.route(/tile\.opentopomap\.org/, (r) =>
-      r.fulfill({ body: PNG, contentType: 'image/png' })
-    );
     await stubBrouter(page);
     await page.goto('/');
     await expect(page.locator('.leaflet-container')).toBeVisible();
@@ -401,6 +398,24 @@ test.describe('route editing', () => {
     await expect(page.locator('#miniBar')).toBeHidden();
   });
 
+  test('switching region keeps the waypoints and re-fits the map', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await stubHeight(page);
+    // a route inside Austria, drawn direct so no elevation service is needed to
+    // verify it survives the CRS swap
+    await page.goto('/#p=trekking&w=47.24000,14.15000,r;47.25000,14.16000,d');
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    await page.route(/heightProfile/, (r) => r.fulfill({ json: bevProfile }));
+    await page.locator('#regionSeg button[data-region="at"]').click();
+    // map was torn down and rebuilt, the waypoints came along untouched
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    await expect(page.locator('#legList li').first().locator('.legmeta .d'))
+      .toHaveText('47.2400, 14.1500');
+    await expect(page.locator('.leaflet-marker-icon')).toHaveCount(2);
+  });
+
   test('the minimized card mirrors distance/ascent and its undo works', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);
@@ -417,5 +432,159 @@ test.describe('route editing', () => {
     // undo from the mini bar drops the last waypoint
     await page.locator('#btnUndoMin').click();
     await expect(page.locator('#legList li')).toHaveCount(1);
+  });
+});
+
+// Austria renders from BEV / basemap.at on the standard Web-Mercator grid and
+// takes its elevation from BEV's height API — a different projection *and* a
+// different DEM from the Swiss region, so both paths get their own coverage.
+test.describe('Austria (BEV)', () => {
+  async function stubBevHeight(page, onCall) {
+    await page.route(/heightProfile/, (r) => {
+      onCall?.();
+      return r.fulfill({ json: bevProfile });
+    });
+  }
+  const AT = '/#r=at&p=trekking&w=47.24000,14.15000,r';
+
+  test('selecting Austria requests BEV tiles with the documented URL shape', async ({ page }) => {
+    const urls = [];
+    await page.route(TILE_HOSTS, (r) => {
+      urls.push(r.request().url());
+      return r.fulfill({ body: PNG, contentType: 'image/png' });
+    });
+    await stubBrouter(page);
+    await page.goto('/#r=at');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await expect.poll(() => urls.filter((u) => u.includes('maps.bev.gv.at')).length)
+      .toBeGreaterThan(0);
+    // plain XYZ (z/x/y), unlike swisstopo's LV95 WMTS path
+    expect(urls.find((u) => u.includes('maps.bev.gv.at'))).toMatch(
+      /maps\.bev\.gv\.at\/tiles\/karte\/\d+\/\d+\/\d+\.png/
+    );
+    // the region is reflected in the UI: Austria selected, third base offered
+    await expect(page.locator('#regionSeg button[data-region="at"]')).toHaveClass(/\bon\b/);
+    await expect(page.locator('#basesw button')).toHaveCount(3);
+    await expect(page.locator('#basesw button[data-base="terrain"]')).toBeVisible();
+  });
+
+  test('the aerial base switches to the basemap.at orthophoto (z/y/x order)', async ({ page }) => {
+    const urls = [];
+    await page.route(TILE_HOSTS, (r) => {
+      urls.push(r.request().url());
+      return r.fulfill({ body: PNG, contentType: 'image/png' });
+    });
+    await stubBrouter(page);
+    await page.goto('/#r=at');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator('#basesw button[data-base="aerial"]').click();
+    await expect.poll(() => urls.filter((u) => u.includes('bmaporthofoto30cm')).length)
+      .toBeGreaterThan(0);
+    expect(urls.find((u) => u.includes('bmaporthofoto30cm'))).toMatch(
+      /maps\d?\.wien\.gv\.at\/basemap\/bmaporthofoto30cm\/normal\/google3857\/\d+\/\d+\/\d+\.jpeg/
+    );
+  });
+
+  test('a direct leg samples the BEV DEM for ascent', async ({ page }) => {
+    let heightCalled = false;
+    await stubTiles(page);
+    await stubBrouter(page);
+    await stubBevHeight(page, () => (heightCalled = true));
+    await page.goto('/#r=at');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator('#modeSeg button[data-mode="direct"]').click();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    // BEV reports the climb itself (stats.sumUps), rather than us differencing samples
+    await expect(page.locator('#statAsc')).toHaveText('42');
+    expect(heightCalled).toBe(true);
+    // …and the same service feeds the whole-route profile chart
+    await expect(page.locator('#profChart svg.prof')).toBeVisible();
+  });
+
+  test('the BEV DEM answering 0 everywhere counts as no data, not flat ground', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    // what the service returns for a line outside Austria
+    await page.route(/heightProfile/, (r) =>
+      r.fulfill({
+        json: {
+          stats: { sumUps: 0, sumDowns: 0, dist: 1000 },
+          heights: [0, 0, 0],
+          point_list: [[14.15, 47.24], [14.155, 47.245], [14.16, 47.25]],
+        },
+      })
+    );
+    await page.goto('/#r=at');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator('#modeSeg button[data-mode="direct"]').click();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    // ascent stays 0 and no bogus flat profile is drawn
+    await expect(page.locator('#statAsc')).toHaveText('0');
+    await expect(page.locator('#profileGrp')).toBeHidden();
+  });
+
+  test('right-click reads the BEV terrain height', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.route(/singleHeight/, (r) => r.fulfill({ json: { height: 2165.4 } }));
+    await page.goto('/#r=at');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 480, y: 300 }, button: 'right' });
+    const popup = page.locator('.leaflet-popup-content');
+    await expect(popup).toBeVisible();
+    await expect(popup).toContainText('2165.4 m');
+    await expect(popup).toContainText('Elevation (BEV DEM)');
+    // right-click must NOT drop a waypoint
+    await expect(page.locator('.leaflet-marker-icon')).toHaveCount(0);
+  });
+
+  test('toggling the basemap.at overlay requests its tiles', async ({ page }) => {
+    const overlayUrls = [];
+    await page.route(TILE_HOSTS, (r) => {
+      const u = r.request().url();
+      if (u.includes('bmapoverlay')) overlayUrls.push(u);
+      return r.fulfill({ body: PNG, contentType: 'image/png' });
+    });
+    await stubBrouter(page);
+    await page.goto('/#r=at');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await expect(page.locator('#overlayTitle')).toHaveText('basemap.at overlays');
+    await page
+      .locator('#overlayList label', { hasText: 'Labels & boundaries' })
+      .locator('input')
+      .check();
+    await expect.poll(() => overlayUrls.length).toBeGreaterThan(0);
+    expect(overlayUrls[0]).toMatch(
+      /basemap\/bmapoverlay\/normal\/google3857\/\d+\/\d+\/\d+\.png/
+    );
+  });
+
+  test('the region rides in the URL hash and is left implicit for Switzerland', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await stubBevHeight(page);
+    await stubHeight(page);   // the switch back to Switzerland re-profiles on swissAlti3D
+    await page.goto(AT);
+    await expect(page.locator('#legList li')).toHaveCount(1);
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#legList li')).toHaveCount(2);
+    await expect.poll(() => new URL(page.url()).hash).toMatch(/^#r=at&p=trekking&w=/);
+    // back to the default region: no r=, so links predating regions still parse
+    await page.locator('#regionSeg button[data-region="ch"]').click();
+    await expect.poll(() => new URL(page.url()).hash).toMatch(/^#p=trekking&w=/);
+  });
+
+  test('the last region used is remembered across reloads', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    await page.goto('/');
+    await expect(page.locator('#regionSeg button[data-region="ch"]')).toHaveClass(/\bon\b/);
+    await page.locator('#regionSeg button[data-region="at"]').click();
+    await page.goto('/');
+    await expect(page.locator('#regionSeg button[data-region="at"]')).toHaveClass(/\bon\b/);
+    await expect(page.locator('#subtitle')).toContainText('Austrian topo base (BEV)');
   });
 });
