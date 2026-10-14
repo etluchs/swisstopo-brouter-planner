@@ -268,6 +268,49 @@ test.describe('route editing', () => {
     await expect(page.locator('#profChart .prof-steep-lbl')).toHaveCount(0);
   });
 
+  test('switching the BRouter profile re-samples the elevation profile', async ({ page }) => {
+    await stubTiles(page);
+    // Same waypoints, different line per BRouter profile — as in reality.
+    const shifted = JSON.parse(JSON.stringify(leg));
+    shifted.features[0].geometry.coordinates = [[8.541, 47.376], [8.539, 47.381], [8.5502, 47.3821]];
+    await page.route(/\/brouter/, (r) =>
+      r.fulfill({ json: /profile=fastbike/.test(r.request().url()) ? shifted : leg })
+    );
+    const posts = [];
+    await page.route(/profile\.json/, (r) => {
+      if (r.request().method() === 'POST') posts.push(r.request().postData());
+      return r.fulfill({ json: profile });
+    });
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#profChart svg.prof')).toBeVisible();
+    await expect.poll(() => posts.length).toBe(1);
+    await page.locator('#profile').selectOption('fastbike');
+    // the new line must be sampled, not served from the trekking line's cache entry
+    await expect.poll(() => posts.length).toBe(2);
+    expect(posts[1]).not.toEqual(posts[0]);
+  });
+
+  test('a failed elevation profile clears the previous route’s chart', async ({ page }) => {
+    await stubTiles(page);
+    await stubBrouter(page);
+    let fail = false;
+    await page.route(/profile\.json/, (r) =>
+      fail ? r.fulfill({ status: 500, body: '' }) : r.fulfill({ json: profile })
+    );
+    await page.goto('/');
+    await expect(page.locator('.leaflet-container')).toBeVisible();
+    await page.locator(MAP).click({ position: { x: 250, y: 220 } });
+    await page.locator(MAP).click({ position: { x: 430, y: 340 } });
+    await expect(page.locator('#profileGrp')).toBeVisible();
+    fail = true;
+    // extending the route makes a new line, whose profile request now fails
+    await page.locator(MAP).click({ position: { x: 520, y: 260 } });
+    await expect(page.locator('#profileGrp')).toBeHidden();
+  });
+
   test('“Send to phone” shares the GPX via the Web Share API', async ({ page }) => {
     await stubTiles(page);
     await stubBrouter(page);
