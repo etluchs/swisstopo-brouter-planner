@@ -503,7 +503,18 @@ async function austrianProfile(flat){   // flat: [[lat,lng]...]
 // Best-effort and cached; the ascent stat is unchanged.
 const STEEP_GRADE=0.18;         // rise/run above which an *ascent* is flagged on the profile
 let profileMarker=null;
-const routeSig=()=>waypoints.map(w=>`${w.lng.toFixed(5)},${w.lat.toFixed(5)},${w.mode}`).join('|');
+// The profile is keyed by the line actually drawn, not by the waypoints: the same
+// waypoints give a different line under another BRouter profile or endpoint, and
+// a leg that failed (straight fallback) and later routes changes it too. A short
+// FNV-1a hash of the 5-decimal coordinates keeps the key compact for long routes.
+function lineSig(flat){
+  let h=0x811c9dc5;
+  for(const [lat,lng] of flat){
+    const s=`${lat.toFixed(5)},${lng.toFixed(5)};`;
+    for(let i=0;i<s.length;i++){ h^=s.charCodeAt(i); h=Math.imul(h,0x01000193); }
+  }
+  return `${flat.length}:${(h>>>0).toString(36)}`;
+}
 async function updateProfile(legs,my){
   const flat=[];                         // one deduped line through all legs
   for(const o of legs) for(const ll of o.latlngs){
@@ -511,9 +522,14 @@ async function updateProfile(legs,my){
     if(!last||last[0]!==ll[0]||last[1]!==ll[1]) flat.push(ll);
   }
   if(flat.length<2){renderProfile(null);return;}
-  const sig=`${region.id}|${routeSig()}`;
+  const sig=`${region.id}|${lineSig(flat)}`;
   let prof=profileCache.get(sig);
-  if(!prof){ try{ prof=await region.profile(flat); }catch(_){ return; } if(my!==gen)return; profileCache.set(sig,prof); }
+  if(!prof){
+    try{ prof=await region.profile(flat); }
+    catch(_){ if(my===gen) renderProfile(null); return; }   // don't leave the previous route's chart up
+    if(my!==gen)return;
+    profileCache.set(sig,prof);
+  }
   if(my!==gen)return;
   renderProfile(prof,flat);
 }
